@@ -1,6 +1,6 @@
 import numpy as np
 import random
-import lib.lousybook01.neural_lb01 as neural_lb01 # or just "import lib" or "import lib.lousybook" but then you need to change the neural network creation and stuff
+import lib.lousybook01.LousyBookML as LousyBookML # or just "import lib" or "import lib.lousybook" but then you need to change the neural network creation and stuff
 
 # Example usage:
 if __name__ == "__main__":
@@ -11,7 +11,7 @@ if __name__ == "__main__":
     # 
     # # Create a neural network instance
     # nn = NeuralNetwork(input_size, hidden_size, output_size)
-    nn = neural_lb01.NeuralNetwork()
+    nn = LousyBookML.NeuralNetwork()
     # Define training data
     X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
     y = np.array([[0], [1], [1], [0]])
