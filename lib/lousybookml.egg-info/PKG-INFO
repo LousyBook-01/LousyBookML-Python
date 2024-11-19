@@ -1,6 +1,22 @@
+Metadata-Version: 2.1
+Name: lousybookml
+Version: 0.1.0
+Summary: A Python machine learning library for educational purposes
+Author: LousyBook01
+Keywords: machine learning,neural networks,linear regression
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy>=1.19.0
+Provides-Extra: dev
+Requires-Dist: pytest>=6.0; extra == "dev"
+Requires-Dist: pytest-cov>=2.0; extra == "dev"
+Requires-Dist: matplotlib>=3.3.0; extra == "dev"
+Requires-Dist: pandas>=1.0.0; extra == "dev"
+
 # LousyBookML
 
-A Python machine learning library from scratch made by LousyBook01, implementing neural networks and linear regression.
+A Python machine learning library for educational purposes, implementing neural networks and linear regression from scratch.
 
 ## Features
 
@@ -87,20 +103,20 @@ pytest tests/
 
 ```
 LousyBookML-Python/
-├── lib/
-│   └── lousybook01/
-│       └── LousyBookML/
-│           ├── __init__.py
-│           ├── linear_regression.py
-│           └── neural_network.py
-├── tests/
-│   ├── test_linear_regression.py
-│   └── test_neural_network.py
-├── examples/
-│   ├── linear_regression_examples.py
-│   └── neural_network_examples.py
-├── setup.py
-└── README.md
+â”œâ”€â”€ lib/
+â”‚   â””â”€â”€ lousybook01/
+â”‚       â””â”€â”€ LousyBookML/
+â”‚           â”œâ”€â”€ __init__.py
+â”‚           â”œâ”€â”€ linear_regression.py
+â”‚           â””â”€â”€ neural_network.py
+â”œâ”€â”€ tests/
+â”‚   â”œâ”€â”€ test_linear_regression.py
+â”‚   â””â”€â”€ test_neural_network.py
+â”œâ”€â”€ examples/
+â”‚   â”œâ”€â”€ linear_regression_examples.py
+â”‚   â””â”€â”€ neural_network_examples.py
+â”œâ”€â”€ setup.py
+â””â”€â”€ README.md
 ```
 
 ## License
