@@ -1,4 +1,5 @@
 numpy
 pytest
 matplotlib
-gym
+gymnasium
+pygame

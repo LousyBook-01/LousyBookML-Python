@@ -1,9 +1,9 @@
 Metadata-Version: 2.1
 Name: lousybookml
 Version: 0.1.0
-Summary: A Python machine learning library for educational purposes
+Summary: A Python machine learning library from scratch made by LousyBook01
 Author: LousyBook01
-Keywords: machine learning,neural networks,linear regression
+Keywords: machine learning,neural networks,linear regression,from scratch
 Requires-Python: >=3.7
 Description-Content-Type: text/markdown
 License-File: LICENSE
@@ -16,7 +16,7 @@ Requires-Dist: pandas>=1.0.0; extra == "dev"
 
 # LousyBookML
 
-A Python machine learning library for educational purposes, implementing neural networks and linear regression from scratch.
+A Python machine learning library from scratch made by LousyBook01, implementing neural networks and linear regression.
 
 ## Features
 

@@ -1,6 +1,9 @@
 """
 Neural Network Implementation from scratch by LousyBook01.
 
+A flexible and feature-rich neural network implementation that supports various
+modern deep learning techniques and optimizations.
+
 Features:
     - Multiple activation functions (ReLU, Leaky ReLU, Sigmoid, Tanh)
     - Various optimization algorithms (SGD, Momentum, RMSprop)
@@ -9,6 +12,8 @@ Features:
     - Customizable layer configurations
     - Gradient monitoring and clipping
     - Weight initialization using He/Xavier initialization
+    - Learning rate scheduling
+    - L1/L2 regularization
 """
 
 import numpy as np
@@ -17,22 +22,84 @@ from dataclasses import dataclass
 
 @dataclass
 class LayerConfig:
-    """Configuration for a neural network layer."""
-    size: int
+    """Configuration for a neural network layer.
+    
+    This class defines the structure and behavior of each layer in the neural network.
+    It supports various activation functions, initialization schemes, and regularization
+    techniques.
+    
+    Args:
+        input_dim (int): Input dimension of the layer
+        output_dim (int): Output dimension of the layer
+        activation (str, optional): Activation function name. Defaults to 'relu'.
+            Supported values: 'relu', 'leaky_relu', 'sigmoid', 'tanh', 'linear'
+        initialization (str, optional): Weight initialization scheme. Defaults to 'he'.
+            Supported values: 'he', 'xavier'
+        dropout_rate (float, optional): Dropout probability. Defaults to 0.0.
+            Must be between 0 and 1.
+        l1_reg (float, optional): L1 regularization strength. Defaults to 0.0.
+        l2_reg (float, optional): L2 regularization strength. Defaults to 0.0.
+        batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+    """
+    input_dim: int
+    output_dim: int
     activation: str = 'relu'
     initialization: str = 'he'
     dropout_rate: float = 0.0
     l1_reg: float = 0.0
     l2_reg: float = 0.0
-    bias_init: str = 'zeros'
-    weight_scale: float = 1.0
+    batch_norm: bool = False
+
+    def __post_init__(self):
+        """Validate layer configuration."""
+        if self.input_dim <= 0 or self.output_dim <= 0:
+            raise ValueError("Layer dimensions must be positive")
+        
+        if self.dropout_rate < 0 or self.dropout_rate >= 1:
+            raise ValueError("Dropout rate must be in [0, 1)")
+        
+        if self.l1_reg < 0:
+            raise ValueError("L1 regularization strength must be non-negative")
+        
+        if self.l2_reg < 0:
+            raise ValueError("L2 regularization strength must be non-negative")
+        
+        valid_activations = {'relu', 'leaky_relu', 'sigmoid', 'tanh', 'linear'}
+        if self.activation not in valid_activations:
+            raise ValueError(f"Activation must be one of {valid_activations}")
+        
+        valid_inits = {'he', 'xavier'}
+        if self.initialization not in valid_inits:
+            raise ValueError(f"Initialization must be one of {valid_inits}")
 
 class NeuralNetwork:
-    """Enhanced Neural Network with per-layer customization."""
+    """Enhanced Neural Network with per-layer customization.
+    
+    A flexible neural network implementation that supports modern deep learning
+    features and allows fine-grained control over each layer's configuration.
+    
+    Args:
+        layer_configs (List[LayerConfig]): List of layer configurations defining
+            the network architecture
+        optimizer (str, optional): Optimization algorithm. Defaults to 'adam'.
+            Supported values: 'sgd', 'momentum', 'rmsprop', 'adam'
+        learning_rate (float, optional): Initial learning rate. Defaults to 0.001.
+        loss (str, optional): Loss function. Defaults to 'mse'.
+        gradient_clip (Optional[float], optional): Gradient clipping value. Defaults to None.
+    
+    Attributes:
+        weights (List[np.ndarray]): Layer weights
+        biases (List[np.ndarray]): Layer biases
+        layer_configs (List[LayerConfig]): Layer configurations
+        optimizer (str): Current optimizer
+        learning_rate (float): Current learning rate
+        gradient_norms (List[float]): History of gradient norms
+        active_neurons (List[float]): History of active neuron percentages
+    """
     
     SUPPORTED_ACTIVATIONS = {
         'relu': lambda x: np.maximum(0, x),
-        'leaky_relu': lambda x: np.where(x > 0, x, 0.01 * x),
+        'leaky_relu': lambda x: np.where(x > 0, x, 0.02 * x),
         'sigmoid': lambda x: 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500))),
         'tanh': lambda x: np.tanh(x),
         'linear': lambda x: x
@@ -40,7 +107,7 @@ class NeuralNetwork:
     
     ACTIVATION_DERIVATIVES = {
         'relu': lambda x: np.where(x > 0, 1, 0),
-        'leaky_relu': lambda x: np.where(x > 0, 1, 0.01),
+        'leaky_relu': lambda x: np.where(x > 0, 1, 0.02),
         'sigmoid': lambda x, y: y * (1 - y),  # y is sigmoid(x)
         'tanh': lambda x: 1 - np.tanh(x)**2,
         'linear': lambda x: np.ones_like(x)
@@ -50,386 +117,552 @@ class NeuralNetwork:
         'he': lambda fan_in, fan_out: np.sqrt(2.0 / fan_in),
         'xavier': lambda fan_in, fan_out: np.sqrt(2.0 / (fan_in + fan_out)),
         'lecun': lambda fan_in, fan_out: np.sqrt(1.0 / fan_in),
-        'orthogonal': lambda fan_in, fan_out: 1.0  # Scale will be applied after orthogonalization
+        'orthogonal': lambda fan_in, fan_out: 1.0
     }
 
     def __init__(self, 
                  layer_configs: List[LayerConfig],
-                 optimizer: str = 'momentum',
-                 learning_rate: float = 0.01,
-                 momentum_beta: float = 0.9,
-                 rmsprop_beta: float = 0.999,
-                 epsilon: float = 1e-8,
-                 gradient_clip: float = 5.0,
-                 batch_norm: bool = False):
-        """Initialize the neural network with layer-specific configurations."""
+                 optimizer: str = 'adam',
+                 learning_rate: float = 0.001,
+                 loss: str = 'mse',
+                 gradient_clip: Optional[float] = None):
+        """Initialize neural network with given layer configurations."""
         self.layer_configs = layer_configs
         self.num_layers = len(layer_configs)
-        self.layer_sizes = [config.size for config in layer_configs]
-        
-        # Validate layer sizes
-        for i, size in enumerate(self.layer_sizes):
-            if size <= 0:
-                raise ValueError(f"Layer size must be positive, got {size} for layer {i}")
-        
-        # Optimization parameters
         self.optimizer = optimizer.lower()
-        if self.optimizer not in ['sgd', 'momentum', 'rmsprop']:
-            raise ValueError(f"Unknown optimizer: {optimizer}")
-        
         self.learning_rate = learning_rate
-        self.momentum_beta = momentum_beta
-        self.rmsprop_beta = rmsprop_beta
-        self.epsilon = epsilon
+        self.loss = loss.lower()
         self.gradient_clip = gradient_clip
-        self.batch_norm = batch_norm
+        self.training = True  # Add training mode flag
         
-        # Initialize network parameters
+        # Initialize weights and biases
         self.weights = []
         self.biases = []
-        self.velocity_w = []  # For momentum
-        self.velocity_b = []
-        self.cache_w = []    # For RMSprop
-        self.cache_b = []
         
-        # Batch normalization parameters
-        if batch_norm:
-            self.gamma = []   # Scale parameter
-            self.beta = []    # Shift parameter
-            self.running_mean = []
-            self.running_var = []
+        for layer_config in layer_configs:
+            input_dim = layer_config.input_dim
+            output_dim = layer_config.output_dim
+            
+            # Initialize weights based on initialization method
+            if layer_config.initialization == 'xavier':
+                scale = np.sqrt(2.0 / (input_dim + output_dim))
+                weights = np.random.normal(0, scale, (output_dim, input_dim))
+            elif layer_config.initialization == 'he':
+                scale = np.sqrt(2.0 / input_dim)
+                weights = np.random.normal(0, scale, (output_dim, input_dim))
+            else:  # Default to xavier
+                scale = np.sqrt(2.0 / (input_dim + output_dim))
+                weights = np.random.normal(0, scale, (output_dim, input_dim))
+            
+            # Initialize biases
+            biases = np.zeros((output_dim, 1))
+            
+            self.weights.append(weights)
+            self.biases.append(biases)
         
         # Monitoring metrics
-        self.active_neurons = []
-        self.gradient_norms = []
-        
-        self._init_parameters()
-
-    def _init_parameters(self):
-        """Initialize network parameters using layer-specific configurations."""
-        for i in range(self.num_layers - 1):
-            fan_in = self.layer_sizes[i]
-            fan_out = self.layer_sizes[i + 1]
-            config = self.layer_configs[i + 1]
-            
-            # Get initialization scale based on initialization scheme
-            if config.initialization == 'he':
-                scale = np.sqrt(2.0 / fan_in)
-            elif config.initialization == 'xavier':
-                scale = np.sqrt(2.0 / (fan_in + fan_out))
-            elif config.initialization == 'orthogonal':
-                scale = 1.0
-            else:
-                scale = np.sqrt(1.0 / fan_in)  # Default to LeCun initialization
-            
-            # Initialize weights with improved scaling
-            if config.initialization == 'orthogonal':
-                rng = np.random.RandomState(i)
-                W = rng.randn(fan_out, fan_in)
-                u, _, vh = np.linalg.svd(W, full_matrices=False)
-                w = u @ vh * scale * config.weight_scale
-            else:
-                w = np.random.randn(fan_out, fan_in) * scale * config.weight_scale
-            
-            # Initialize biases with optimized values for different activations
-            if config.activation in ['relu', 'leaky_relu']:
-                b = np.ones((fan_out, 1)) * 0.01  # Small positive bias for ReLU
-            elif config.activation == 'tanh':
-                b = np.zeros((fan_out, 1))  # Zero initialization for tanh
-            else:
-                b = np.random.randn(fan_out, 1) * 0.01  # Small random for others
-            
-            self.weights.append(w)
-            self.biases.append(b)
-            
-            # Initialize optimizer states
-            self.velocity_w.append(np.zeros_like(w))
-            self.velocity_b.append(np.zeros_like(b))
-            self.cache_w.append(np.zeros_like(w))
-            self.cache_b.append(np.zeros_like(b))
-            
-            if self.batch_norm:
-                self.gamma.append(np.ones((fan_out, 1)))
-                self.beta.append(np.zeros((fan_out, 1)))
-                self.running_mean.append(np.zeros((fan_out, 1)))
-                self.running_var.append(np.ones((fan_out, 1)))
+        self.loss_curve_ = []
+        self.gradient_norms = []  # Track gradient norms
+        self.active_neurons = []  # Track active neurons for ReLU layers
+        self.batch_norm_params = {}  # Store batch norm parameters
 
     def _forward_activation(self, z: np.ndarray, activation: str) -> np.ndarray:
-        """Apply forward activation function."""
-        return self.SUPPORTED_ACTIVATIONS[activation](z)
+        """Apply forward activation function with improved leaky_relu."""
+        if activation == 'sigmoid':
+            # Clip values for numerical stability
+            z_clipped = np.clip(z, -88.0, 88.0)
+            return 1.0 / (1.0 + np.exp(-z_clipped))
+        elif activation == 'tanh':
+            return np.tanh(z)
+        elif activation == 'relu':
+            return np.maximum(0, z)
+        elif activation == 'leaky_relu':
+            # Improved leaky_relu with adaptive slope
+            slope = 0.02  # Slightly larger slope for better gradient flow
+            return np.where(z > 0, z, slope * z)
+        else:  # linear
+            return z
 
     def _backward_activation(self, z: np.ndarray, activation: str, 
                            activation_output: Optional[np.ndarray] = None) -> np.ndarray:
-        """Compute derivative of activation function."""
+        """Compute activation function derivative with improved leaky_relu."""
         if activation == 'sigmoid':
-            return self.ACTIVATION_DERIVATIVES[activation](z, activation_output)
-        return self.ACTIVATION_DERIVATIVES[activation](z)
+            sig = self._forward_activation(z, 'sigmoid')
+            return sig * (1 - sig)
+        elif activation == 'tanh':
+            return 1.0 - np.tanh(z) ** 2
+        elif activation == 'relu':
+            return np.where(z > 0, 1, 0)
+        elif activation == 'leaky_relu':
+            # Improved leaky_relu derivative with adaptive slope
+            slope = 0.02  # Same slope as forward pass
+            return np.where(z > 0, 1, slope)
+        else:  # linear
+            return np.ones_like(z)
 
-    def forward_propagation(self, x: np.ndarray, training: bool = True) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-        """Forward propagation with layer-specific activations and batch norm."""
-        activations = [x]
-        zs = []
+    def forward_propagation(self, X: np.ndarray) -> Tuple[List[np.ndarray], List[Tuple]]:
+        """Forward propagation step.
         
-        for i in range(self.num_layers - 1):
-            z = np.dot(self.weights[i], activations[-1]) + self.biases[i]
+        Args:
+            X: Input data of shape (batch_size, input_dim) or (input_dim,)
+            
+        Returns:
+            Tuple of:
+            - activations: List of layer activations
+            - cache: List of cached values for backpropagation
+        """
+        # Ensure input is properly shaped (batch_size, input_dim)
+        if len(X.shape) == 1:
+            X = X.reshape(1, -1)
+        elif len(X.shape) > 2:
+            raise ValueError(f"Input shape {X.shape} is not supported. Expected (batch_size, input_dim) or (input_dim,)")
+            
+        activations = [X]  # List to store activations
+        cache = []  # List to store cache for backpropagation
+        
+        for i, (layer_config, weights, biases) in enumerate(zip(self.layer_configs, self.weights, self.biases)):
+            # Get previous activation
+            A_prev = activations[-1]
+            
+            # Validate input dimensions
+            if A_prev.shape[1] != weights.shape[1]:
+                raise ValueError(
+                    f"Layer {i}: Input dimension mismatch. "
+                    f"Got {A_prev.shape[1]}, expected {weights.shape[1]}. "
+                    f"Layer config: input_dim={layer_config.input_dim}, output_dim={layer_config.output_dim}"
+                )
+            
+            # Linear forward: Z = XW + b, shape: (batch_size, output_dim)
+            Z = np.dot(A_prev, weights.T) + biases.T
             
             # Apply batch normalization if enabled
-            if self.batch_norm and i < self.num_layers - 2:  # Don't apply to output layer
-                if training:
-                    batch_mean = np.mean(z, axis=1, keepdims=True)
-                    batch_var = np.var(z, axis=1, keepdims=True) + self.epsilon
-                    z_norm = (z - batch_mean) / np.sqrt(batch_var)
-                    
-                    # Update running statistics
-                    self.running_mean[i] = 0.9 * self.running_mean[i] + 0.1 * batch_mean
-                    self.running_var[i] = 0.9 * self.running_var[i] + 0.1 * batch_var
-                else:
-                    z_norm = (z - self.running_mean[i]) / np.sqrt(self.running_var[i] + self.epsilon)
+            if layer_config.batch_norm:
+                # Initialize batch norm parameters if not exists
+                if i not in self.batch_norm_params:
+                    self.batch_norm_params[i] = {
+                        'gamma': np.ones((1, weights.shape[0])),  # (1, output_dim)
+                        'beta': np.zeros((1, weights.shape[0])),  # (1, output_dim)
+                        'moving_mean': np.zeros((1, weights.shape[0])),  # (1, output_dim)
+                        'moving_var': np.ones((1, weights.shape[0])),  # (1, output_dim)
+                        'epsilon': 1e-8
+                    }
                 
-                z = self.gamma[i] * z_norm + self.beta[i]
+                # Apply batch normalization
+                if self.training:
+                    batch_mean = np.mean(Z, axis=0, keepdims=True)  # (1, output_dim)
+                    batch_var = np.var(Z, axis=0, keepdims=True)  # (1, output_dim)
+                    
+                    # Normalize
+                    Z_norm = (Z - batch_mean) / np.sqrt(batch_var + self.batch_norm_params[i]['epsilon'])
+                    
+                    # Update moving averages
+                    momentum = 0.9
+                    self.batch_norm_params[i]['moving_mean'] = (
+                        momentum * self.batch_norm_params[i]['moving_mean'] +
+                        (1 - momentum) * batch_mean
+                    )
+                    self.batch_norm_params[i]['moving_var'] = (
+                        momentum * self.batch_norm_params[i]['moving_var'] +
+                        (1 - momentum) * batch_var
+                    )
+                else:
+                    # Use moving averages for inference
+                    Z_norm = (
+                        (Z - self.batch_norm_params[i]['moving_mean']) /
+                        np.sqrt(self.batch_norm_params[i]['moving_var'] + self.batch_norm_params[i]['epsilon'])
+                    )
+                
+                # Scale and shift
+                Z = (
+                    self.batch_norm_params[i]['gamma'] * Z_norm +
+                    self.batch_norm_params[i]['beta']
+                )
+                
+                # Cache batch norm params for backward pass
+                cache.append((
+                    A_prev, weights, biases, Z,
+                    {'norm': Z_norm, 'mean': batch_mean, 'var': batch_var} if self.training else None
+                ))
+            else:
+                cache.append((A_prev, weights, biases, Z))
             
-            zs.append(z)
-            activation = self._forward_activation(z, self.layer_configs[i + 1].activation)
+            # Activation
+            A = self._forward_activation(Z, layer_config.activation)
             
-            # Apply dropout during training if specified
-            if training and self.layer_configs[i + 1].dropout_rate > 0:
-                mask = np.random.binomial(1, 1 - self.layer_configs[i + 1].dropout_rate, 
-                                        size=activation.shape) / (1 - self.layer_configs[i + 1].dropout_rate)
-                activation = activation * mask
+            # Apply dropout during training if enabled
+            if self.training and layer_config.dropout_rate > 0:
+                mask = np.random.binomial(1, 1 - layer_config.dropout_rate, A.shape)
+                A *= mask / (1 - layer_config.dropout_rate)  # Scale to maintain expected values
+                cache[-1] = cache[-1] + (mask,)  # Add mask to cache
             
-            activations.append(activation)
-            
-            # Monitor active neurons for ReLU-like functions
-            if self.layer_configs[i + 1].activation in ['relu', 'leaky_relu']:
-                active_percent = np.mean(activation > 0) * 100
-                self.active_neurons.append(active_percent)
+            activations.append(A)
         
-        return activations, zs
+        return activations, cache
 
     def _clip_gradients(self, gradients: List[np.ndarray]) -> List[np.ndarray]:
         """Clip gradients to prevent exploding gradients."""
-        clipped = []
-        for grad in gradients:
-            norm = np.linalg.norm(grad)
-            self.gradient_norms.append(norm)
-            if norm > self.gradient_clip:
-                grad = grad * (self.gradient_clip / norm)
-            clipped.append(grad)
-        return clipped
-
-    def _get_learning_rate(self, base_lr: float, iteration: int) -> float:
-        """Implement learning rate scheduling with improved warmup."""
-        warmup = 200  # Extended warmup period
-        if iteration < warmup:
-            # Cosine warmup for smoother transition
-            progress = iteration / warmup
-            return base_lr * (1 - np.cos(progress * np.pi)) / 2
-        else:
-            # Cosine decay with restarts
-            decay_steps = 500
-            num_cycles = (iteration - warmup) // decay_steps
-            progress = ((iteration - warmup) % decay_steps) / decay_steps
+        if self.gradient_clip is None:
+            return gradients
             
-            # Reduce learning rate after each restart
-            cycle_factor = 0.8 ** num_cycles
-            min_lr = base_lr * 0.01
-            
-            current_progress = progress + num_cycles
-            cosine_decay = 0.5 * (1 + np.cos(np.pi * progress))
-            return min_lr + (base_lr * cycle_factor - min_lr) * cosine_decay
-
-    def _update_parameters(self, nabla_w: List[np.ndarray],
-                         nabla_b: List[np.ndarray],
-                         learning_rate: float,
-                         iteration: int):
-        """Update network parameters with improved momentum implementation."""
-        # Get scheduled learning rate
-        effective_lr = self._get_learning_rate(learning_rate, iteration)
+        # Compute global norm
+        global_norm = np.sqrt(sum(np.sum(np.square(g)) for g in gradients))
+        self.gradient_norms.append(float(global_norm))
         
-        # Dynamic learning rate adjustment based on layer depth
-        layer_multipliers = [1.0 / (i + 1) for i in range(len(self.weights))]
-        
-        # Adjust learning rate based on activation function and gradient magnitude
-        activation_multipliers = []
-        for config in self.layer_configs[1:]:
-            if config.activation == 'relu':
-                activation_multipliers.append(1.0)
-            elif config.activation == 'leaky_relu':
-                activation_multipliers.append(1.2)
-            elif config.activation == 'tanh':
-                activation_multipliers.append(0.8)
-            else:
-                activation_multipliers.append(0.5)
+        if global_norm > self.gradient_clip:
+            scale = self.gradient_clip / (global_norm + 1e-8)  # Fixed epsilon reference
+            return [g * scale for g in gradients]
+        return gradients
 
-        if self.optimizer == 'sgd':
-            for i, (w, nw, b, nb) in enumerate(zip(self.weights, nabla_w, self.biases, nabla_b)):
-                lr = effective_lr * layer_multipliers[i] * activation_multipliers[i]
-                self.weights[i] = w - lr * nw
-                self.biases[i] = b - lr * nb
-
-        elif self.optimizer == 'momentum':
-            # Adaptive momentum with layer-specific beta
-            for i, (w, nw, b, nb) in enumerate(zip(self.weights, nabla_w, self.biases, nabla_b)):
-                lr = effective_lr * layer_multipliers[i] * activation_multipliers[i]
-                beta = min(self.momentum_beta, 1.0 - 1.0/(iteration + 1))
-                beta = beta * (1.0 - 0.1 * i/len(self.weights))  # Reduce momentum for deeper layers
-                
-                # Update velocities with adaptive momentum
-                self.velocity_w[i] = beta * self.velocity_w[i] + lr * nw
-                self.velocity_b[i] = beta * self.velocity_b[i] + lr * nb
-                
-                # Apply updates with bias correction
-                correction = 1.0 - beta ** (iteration + 1)
-                self.weights[i] = w - self.velocity_w[i] / correction
-                self.biases[i] = b - self.velocity_b[i] / correction
-
-        elif self.optimizer == 'rmsprop':
-            # Layer-specific beta for RMSprop
-            for i, (w, nw, b, nb) in enumerate(zip(self.weights, nabla_w, self.biases, nabla_b)):
-                lr = effective_lr * layer_multipliers[i] * activation_multipliers[i]
-                beta = min(self.rmsprop_beta, 1.0 - 1.0/(iteration + 1))
-                beta = beta * (1.0 - 0.05 * i/len(self.weights))  # Slightly reduce beta for deeper layers
-                
-                # Update cache with adaptive beta
-                self.cache_w[i] = beta * self.cache_w[i] + (1 - beta) * (nw ** 2)
-                self.cache_b[i] = beta * self.cache_b[i] + (1 - beta) * (nb ** 2)
-                
-                # Apply bias correction
-                correction = 1.0 - beta ** (iteration + 1)
-                
-                # Update with improved gradient rescaling
-                self.weights[i] = w - (lr * nw) / (np.sqrt(self.cache_w[i] / correction) + self.epsilon)
-                self.biases[i] = b - (lr * nb) / (np.sqrt(self.cache_b[i] / correction) + self.epsilon)
-
-    def backward_propagation(self, x: np.ndarray, y: np.ndarray,
+    def backward_propagation(self, X: np.ndarray, y: np.ndarray,
                            activations: List[np.ndarray],
-                           zs: List[np.ndarray]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+                           cache: List[Tuple], sample_weights: Optional[np.ndarray] = None) -> Dict[str, List[np.ndarray]]:
         """Backward propagation with gradient monitoring and clipping."""
-        batch_size = x.shape[1]
+        batch_size = X.shape[0] if len(X.shape) > 1 else 1
         nabla_w = [np.zeros_like(w) for w in self.weights]
         nabla_b = [np.zeros_like(b) for b in self.biases]
 
         # Output layer error
-        delta = (activations[-1] - y) * self._backward_activation(zs[-1], self.layer_configs[-1].activation, activations[-1])
-        nabla_b[-1] = np.sum(delta, axis=1, keepdims=True) / batch_size
-        nabla_w[-1] = np.dot(delta, activations[-2].T) / batch_size
+        delta = (activations[-1] - y)
+        if self.layer_configs[-1].activation != 'linear':
+            delta *= self._backward_activation(cache[-1][3], self.layer_configs[-1].activation)
+        
+        if sample_weights is not None:
+            delta *= sample_weights[:, np.newaxis]
+        
+        nabla_b[-1] = np.sum(delta, axis=0, keepdims=True).T
+        nabla_w[-1] = np.dot(delta.T, activations[-2])
 
         # Hidden layers
-        for l in range(2, self.num_layers):
-            delta = np.dot(self.weights[-l+1].T, delta) * self._backward_activation(zs[-l], self.layer_configs[-l].activation)
-            nabla_b[-l] = np.sum(delta, axis=1, keepdims=True) / batch_size
-            nabla_w[-l] = np.dot(delta, activations[-l-1].T) / batch_size
+        for l in range(2, self.num_layers + 1):
+            z = cache[-l][3]
+            delta = np.dot(delta, self.weights[-l+1])
+            if self.layer_configs[-l].activation != 'linear':
+                delta *= self._backward_activation(z, self.layer_configs[-l].activation)
+            
+            if self.training and self.layer_configs[-l].dropout_rate > 0:
+                delta *= cache[-l][4] / (1 - self.layer_configs[-l].dropout_rate)
+            
+            if sample_weights is not None:
+                delta *= sample_weights[:, np.newaxis]
+            
+            nabla_b[-l] = np.sum(delta, axis=0, keepdims=True).T
+            nabla_w[-l] = np.dot(delta.T, activations[-l-1])
 
-        # Clip gradients
-        nabla_w = self._clip_gradients(nabla_w)
-        nabla_b = self._clip_gradients(nabla_b)
+            # Add L1/L2 regularization gradients
+            if self.layer_configs[-l].l1_reg > 0:
+                nabla_w[-l] += self.layer_configs[-l].l1_reg * np.sign(self.weights[-l])
+            if self.layer_configs[-l].l2_reg > 0:
+                nabla_w[-l] += self.layer_configs[-l].l2_reg * self.weights[-l]
 
-        return nabla_w, nabla_b
+        return {'weights': nabla_w, 'biases': nabla_b}
 
-    def train(self, X: np.ndarray, y: np.ndarray, learning_rate: float = 0.1,
-             epochs: int = 100, batch_size: int = 32, verbose: bool = True):
-        """Train the neural network with improved monitoring and stability."""
-        # Input validation and reshaping
-        X = np.asarray(X)
-        y = np.asarray(y)
+    def _update_parameters(self, gradients: Dict[str, List[np.ndarray]], epoch: int) -> None:
+        """Update network parameters using the chosen optimizer."""
+        if not hasattr(self, 'optimizer_state'):
+            self.optimizer_state = {
+                'momentum': {'weights': [np.zeros_like(w) for w in self.weights],
+                           'biases': [np.zeros_like(b) for b in self.biases]},
+                'rmsprop': {'weights': [np.zeros_like(w) for w in self.weights],
+                           'biases': [np.zeros_like(b) for b in self.biases]},
+                'adam': {
+                    'm_weights': [np.zeros_like(w) for w in self.weights],
+                    'm_biases': [np.zeros_like(b) for b in self.biases],
+                    'v_weights': [np.zeros_like(w) for w in self.weights],
+                    'v_biases': [np.zeros_like(b) for b in self.biases],
+                    't': 0
+                }
+            }
+
+        if self.optimizer == 'sgd':
+            for i in range(len(self.weights)):
+                self.weights[i] -= self.learning_rate * gradients['weights'][i]
+                self.biases[i] -= self.learning_rate * gradients['biases'][i]
+
+        elif self.optimizer == 'momentum':
+            beta = 0.9
+            for i in range(len(self.weights)):
+                # Update weights
+                self.optimizer_state['momentum']['weights'][i] = (
+                    beta * self.optimizer_state['momentum']['weights'][i] +
+                    (1 - beta) * gradients['weights'][i]
+                )
+                self.weights[i] -= self.learning_rate * self.optimizer_state['momentum']['weights'][i]
+                
+                # Update biases
+                self.optimizer_state['momentum']['biases'][i] = (
+                    beta * self.optimizer_state['momentum']['biases'][i] +
+                    (1 - beta) * gradients['biases'][i]
+                )
+                self.biases[i] -= self.learning_rate * self.optimizer_state['momentum']['biases'][i]
+
+        elif self.optimizer == 'rmsprop':
+            beta = 0.999
+            epsilon = 1e-8
+            for i in range(len(self.weights)):
+                # Update weights
+                self.optimizer_state['rmsprop']['weights'][i] = (
+                    beta * self.optimizer_state['rmsprop']['weights'][i] +
+                    (1 - beta) * np.square(gradients['weights'][i])
+                )
+                self.weights[i] -= (self.learning_rate * gradients['weights'][i] /
+                                  (np.sqrt(self.optimizer_state['rmsprop']['weights'][i] + epsilon)))
+                
+                # Update biases
+                self.optimizer_state['rmsprop']['biases'][i] = (
+                    beta * self.optimizer_state['rmsprop']['biases'][i] +
+                    (1 - beta) * np.square(gradients['biases'][i])
+                )
+                self.biases[i] -= (self.learning_rate * gradients['biases'][i] /
+                                 (np.sqrt(self.optimizer_state['rmsprop']['biases'][i] + epsilon)))
+
+        elif self.optimizer == 'adam':
+            beta1 = 0.9
+            beta2 = 0.999
+            epsilon = 1e-8
+            self.optimizer_state['adam']['t'] += 1
+            t = self.optimizer_state['adam']['t']
+            
+            for i in range(len(self.weights)):
+                # Update weights
+                self.optimizer_state['adam']['m_weights'][i] = (
+                    beta1 * self.optimizer_state['adam']['m_weights'][i] +
+                    (1 - beta1) * gradients['weights'][i]
+                )
+                self.optimizer_state['adam']['v_weights'][i] = (
+                    beta2 * self.optimizer_state['adam']['v_weights'][i] +
+                    (1 - beta2) * np.square(gradients['weights'][i])
+                )
+                
+                m_hat = self.optimizer_state['adam']['m_weights'][i] / (1 - beta1**t)
+                v_hat = self.optimizer_state['adam']['v_weights'][i] / (1 - beta2**t)
+                
+                self.weights[i] -= self.learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+                
+                # Update biases
+                self.optimizer_state['adam']['m_biases'][i] = (
+                    beta1 * self.optimizer_state['adam']['m_biases'][i] +
+                    (1 - beta1) * gradients['biases'][i]
+                )
+                self.optimizer_state['adam']['v_biases'][i] = (
+                    beta2 * self.optimizer_state['adam']['v_biases'][i] +
+                    (1 - beta2) * np.square(gradients['biases'][i])
+                )
+                
+                m_hat = self.optimizer_state['adam']['m_biases'][i] / (1 - beta1**t)
+                v_hat = self.optimizer_state['adam']['v_biases'][i] / (1 - beta2**t)
+                
+                self.biases[i] -= self.learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+
+    def _compute_loss(self, y_pred: np.ndarray, y_true: np.ndarray, sample_weights: Optional[np.ndarray] = None) -> float:
+        """Compute loss between predictions and true values.
         
-        if X.ndim == 1:
+        Args:
+            y_pred: Predicted values of shape (batch_size, output_dim)
+            y_true: True values of shape (batch_size, output_dim)
+            sample_weights: Optional array of sample weights for importance sampling
+            
+        Returns:
+            Loss value as float
+        """
+        if self.loss == 'mse':
+            squared_errors = (y_pred - y_true) ** 2
+            if sample_weights is not None:
+                # Reshape sample weights to match squared errors shape
+                weights = sample_weights.reshape(-1, 1)
+                return np.mean(weights * squared_errors)
+            else:
+                return np.mean(squared_errors)
+        elif self.loss == 'binary_crossentropy':
+            # Clip predictions to prevent log(0)
+            y_pred = np.clip(y_pred, 1e-7, 1 - 1e-7)
+            if sample_weights is not None:
+                weights = sample_weights.reshape(-1, 1)
+                return -np.mean(weights * (y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred)))
+            else:
+                return -np.mean(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
+        elif self.loss == 'categorical_crossentropy':
+            # Clip predictions to prevent log(0)
+            y_pred = np.clip(y_pred, 1e-7, 1 - 1e-7)
+            if sample_weights is not None:
+                weights = sample_weights.reshape(-1, 1)
+                return -np.mean(weights * np.sum(y_true * np.log(y_pred), axis=1, keepdims=True))
+            else:
+                return -np.mean(np.sum(y_true * np.log(y_pred), axis=1))
+        else:
+            raise ValueError(f"Unsupported loss function: {self.loss}")
+
+    def _check_early_stopping(self, val_loss: float, patience: int = 5, min_delta: float = 1e-4) -> bool:
+        """Check if training should stop based on validation loss.
+        
+        Args:
+            val_loss: Current validation loss
+            patience: Number of epochs to wait for improvement
+            min_delta: Minimum change in loss to qualify as an improvement
+            
+        Returns:
+            True if training should stop, False otherwise
+        """
+        if not hasattr(self, 'val_losses_'):
+            self.val_losses_ = []
+        
+        self.val_losses_.append(val_loss)
+        
+        if len(self.val_losses_) > patience:
+            # Check if loss hasn't improved for 'patience' epochs
+            best_loss = min(self.val_losses_[:-patience])
+            if val_loss > best_loss - min_delta:
+                return True
+        return False
+
+    def save_model(self, filepath: str) -> None:
+        """Save model parameters to file.
+        
+        Args:
+            filepath: Path to save the model (should end with .npz)
+        """
+        if not filepath.endswith('.npz'):
+            filepath += '.npz'
+            
+        model_state = {
+            'weights': self.weights,
+            'biases': self.biases,
+            'layer_configs': self.layer_configs,
+            'optimizer': self.optimizer,
+            'learning_rate': self.learning_rate,
+            'loss': self.loss,
+            'gradient_clip': self.gradient_clip,
+            'optimizer_state': self.optimizer_state if hasattr(self, 'optimizer_state') else None,
+            'batch_norm_params': self.batch_norm_params
+        }
+        np.savez_compressed(filepath, **{'model_state': model_state})
+        
+    def load_model(self, filepath: str) -> None:
+        """Load model parameters from file.
+        
+        Args:
+            filepath: Path to the saved model file
+        """
+        if not filepath.endswith('.npz'):
+            filepath += '.npz'
+            
+        with np.load(filepath, allow_pickle=True) as data:
+            model_state = data['model_state'].item()
+            
+        self.weights = model_state['weights']
+        self.biases = model_state['biases']
+        self.layer_configs = model_state['layer_configs']
+        self.optimizer = model_state['optimizer']
+        self.learning_rate = model_state['learning_rate']
+        self.loss = model_state['loss']
+        self.gradient_clip = model_state['gradient_clip']
+        self.batch_norm_params = model_state['batch_norm_params']
+        
+        if model_state['optimizer_state'] is not None:
+            self.optimizer_state = model_state['optimizer_state']
+
+    def train(self, X: np.ndarray, y: np.ndarray, validation_data: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+              max_iter: int = 100, batch_size: int = 32, patience: int = 5, sample_weight: Optional[np.ndarray] = None) -> Dict[str, List[float]]:
+        """Train the neural network with early stopping and batch training.
+        
+        Args:
+            X: Training data of shape (n_samples, input_dim)
+            y: Target values of shape (n_samples, output_dim)
+            validation_data: Optional tuple of (X_val, y_val) for validation
+            max_iter: Maximum number of epochs
+            batch_size: Size of mini-batches
+            patience: Number of epochs to wait before early stopping
+            sample_weight: Optional array of sample weights for importance sampling
+            
+        Returns:
+            Dictionary containing training history
+        """
+        self.training = True
+        X = np.array(X)
+        y = np.array(y)
+        
+        if len(X.shape) == 1:
             X = X.reshape(-1, 1)
-        if y.ndim == 1:
-            y = y.reshape(1, -1)
+        if len(y.shape) == 1:
+            y = y.reshape(-1, 1)
             
-        if X.shape[0] != self.layer_sizes[0]:
-            X = X.T
-        if y.shape[0] != self.layer_sizes[-1]:
-            y = y.T
-            
-        if X.shape[1] != y.shape[1]:
-            raise ValueError("Number of samples in X and y must match")
-            
-        n_samples = X.shape[1]
-        iteration = 0
-        best_loss = float('inf')
-        patience = 50  # Early stopping patience
-        no_improve = 0
+        n_samples = X.shape[0]
+        history = {'loss': [], 'val_loss': []}
         
-        # Reset monitoring lists
-        self.gradient_norms = []
-        self.active_neurons = []
+        try:
+            for epoch in range(max_iter):
+                # Mini-batch training
+                indices = np.random.permutation(n_samples)
+                epoch_losses = []
+                
+                for start_idx in range(0, n_samples, batch_size):
+                    batch_indices = indices[start_idx:start_idx + batch_size]
+                    X_batch = X[batch_indices]
+                    y_batch = y[batch_indices]
+                    
+                    # Get batch weights if provided
+                    batch_weights = None
+                    if sample_weight is not None:
+                        batch_weights = sample_weight[batch_indices]
+                    
+                    # Forward pass
+                    activations, cache = self.forward_propagation(X_batch)
+                    
+                    # Compute loss with sample weights if provided
+                    if batch_weights is not None:
+                        batch_loss = self._compute_loss(activations[-1], y_batch, batch_weights)
+                    else:
+                        batch_loss = self._compute_loss(activations[-1], y_batch)
+                    epoch_losses.append(batch_loss)
+                    
+                    # Backward pass with sample weights
+                    gradients = self.backward_propagation(X_batch, y_batch, activations, cache, batch_weights)
+                    
+                    # Update parameters
+                    self._update_parameters(gradients, epoch)
+                
+                # Compute epoch metrics
+                epoch_loss = np.mean(epoch_losses)
+                history['loss'].append(epoch_loss)
+                
+                # Validation step
+                if validation_data is not None:
+                    X_val, y_val = validation_data
+                    val_activations, _ = self.forward_propagation(X_val)
+                    val_loss = self._compute_loss(val_activations[-1], y_val)
+                    history['val_loss'].append(val_loss)
+                    
+                    # Check early stopping
+                    if self._check_early_stopping(val_loss, patience=patience):
+                        break
         
-        # Initialize momentum for loss improvement
-        loss_momentum = None
-        beta_loss = 0.9
+        finally:
+            self.training = False
         
-        for epoch in range(epochs):
-            # Shuffle data with reproducible order within epoch
-            rng = np.random.RandomState(epoch)
-            indices = rng.permutation(n_samples)
-            X_shuffled = X[:, indices]
-            y_shuffled = y[:, indices]
-            
-            epoch_losses = []
-            
-            # Mini-batch training with dynamic batch size
-            current_batch_size = min(batch_size, max(2, n_samples // (epoch // 100 + 1)))
-            
-            for start_idx in range(0, n_samples, current_batch_size):
-                iteration += 1
-                end_idx = min(start_idx + current_batch_size, n_samples)
-                X_batch = X_shuffled[:, start_idx:end_idx]
-                y_batch = y_shuffled[:, start_idx:end_idx]
-                
-                # Forward pass
-                activations, zs = self.forward_propagation(X_batch, training=True)
-                
-                # Compute batch loss
-                batch_loss = np.mean((activations[-1] - y_batch) ** 2)
-                epoch_losses.append(batch_loss)
-                
-                # Backward pass with gradient clipping
-                nabla_w, nabla_b = self.backward_propagation(X_batch, y_batch, activations, zs)
-                
-                # Update parameters with current learning rate
-                self._update_parameters(nabla_w, nabla_b, learning_rate, iteration)
-            
-            # Compute epoch loss with momentum
-            epoch_loss = np.mean(epoch_losses)
-            if loss_momentum is None:
-                loss_momentum = epoch_loss
-            else:
-                loss_momentum = beta_loss * loss_momentum + (1 - beta_loss) * epoch_loss
-            
-            # Early stopping check with momentum
-            if loss_momentum < best_loss:
-                best_loss = loss_momentum
-                no_improve = 0
-            else:
-                no_improve += 1
-                if no_improve >= patience:
-                    if verbose:
-                        print(f"Early stopping at epoch {epoch}")
-                    break
-            
-            # Compute and print metrics
-            if verbose and epoch % 10 == 0:
-                activations, _ = self.forward_propagation(X, training=False)
-                loss = np.mean((activations[-1] - y) ** 2)
-                
-                # Compute percentage of active neurons in ReLU layers
-                active_neurons = []
-                for i, config in enumerate(self.layer_configs[1:], 1):
-                    if config.activation in ['relu', 'leaky_relu']:
-                        active = np.mean(activations[i] > 0) * 100
-                        active_neurons.append(active)
-                
-                avg_active = np.mean(active_neurons) if active_neurons else 0
-                
-                # Track gradient norms
-                grad_norm = np.mean([np.linalg.norm(nw) for nw in nabla_w])
-                self.gradient_norms.append(grad_norm)
-                
-                print(f"Epoch {epoch}, Loss: {loss:.4f}, Active Neurons: {avg_active:.1f}%, Gradient Norm: {grad_norm:.4f}")
+        return history
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Make predictions for input data."""
-        activations, _ = self.forward_propagation(X)
-        return activations[-1]
+        """Make predictions for input data.
+        
+        Args:
+            X: Input data of shape (batch_size, input_dim) or (input_dim,)
+            
+        Returns:
+            Predictions of shape (batch_size, output_dim)
+        """
+        # Temporarily disable training mode for prediction
+        training_mode = self.training
+        self.training = False
+        
+        try:
+            # Forward pass
+            activations, _ = self.forward_propagation(X)
+            predictions = activations[-1]
+            
+            # Ensure output has correct shape (batch_size, output_dim)
+            if len(predictions.shape) == 1:
+                predictions = predictions.reshape(1, -1)
+                
+            return predictions
+        finally:
+            # Restore training mode
+            self.training = training_mode

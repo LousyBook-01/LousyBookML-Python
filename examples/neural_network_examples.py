@@ -5,8 +5,8 @@ from lousybook01.LousyBookML import NeuralNetwork, LayerConfig
 def xor_example():
     """Demonstrate XOR problem solution with different architectures."""
     # XOR data
-    X = np.array([[0, 0, 1, 1],
-                  [0, 1, 0, 1]])
+    X = np.array([[0, 1, 0, 1],
+                  [0, 0, 1, 1]])
     y = np.array([[0, 1, 1, 0]])
     
     # Different architectures to try
@@ -39,6 +39,16 @@ def xor_example():
                 LayerConfig(size=1, activation='sigmoid')
             ],
             "optimizer": "momentum"
+        },
+        {
+            "name": "Leaky Relu Activation Network",
+            "layers": [
+                LayerConfig(size=2),
+                LayerConfig(size=4, activation='leaky_relu'),
+                LayerConfig(size=4, activation='leaky_relu'),
+                LayerConfig(size=1, activation='sigmoid')
+            ],
+            "optimizer": "rmsprop"
         }
     ]
     
@@ -109,14 +119,14 @@ def classification_example():
     # Create model
     layers = [
         LayerConfig(size=2),
-        LayerConfig(size=16, activation='relu', dropout_rate=0.1),
-        LayerConfig(size=8, activation='relu', dropout_rate=0.1),
+        LayerConfig(size=16, activation='leaky_relu', dropout_rate=0.1),
+        LayerConfig(size=8, activation='leaky_relu', dropout_rate=0.1),
         LayerConfig(size=2, activation='sigmoid')
     ]
     
     model = NeuralNetwork(
         layer_configs=layers,
-        optimizer='momentum',
+        optimizer='rmsprop',
         learning_rate=0.05,
         batch_norm=True
     )

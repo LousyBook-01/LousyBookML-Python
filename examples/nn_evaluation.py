@@ -14,13 +14,13 @@ def test_xor_generalization():
     # Create network
     layers = [
         LayerConfig(size=2),
-        LayerConfig(size=4, activation='relu', initialization='he'),
+        LayerConfig(size=4, activation='leaky_relu', initialization='he'),
         LayerConfig(size=1, activation='sigmoid', initialization='xavier')
     ]
     
     model = NeuralNetwork(
         layer_configs=layers,
-        optimizer='momentum',
+        optimizer='rmsprop',
         learning_rate=0.1,
         momentum_beta=0.9,
         batch_norm=True
@@ -119,9 +119,9 @@ def test_spiral_classification():
     # Create model with deeper architecture
     layers = [
         LayerConfig(size=2),
-        LayerConfig(size=32, activation='relu', initialization='he', dropout_rate=0.2),
-        LayerConfig(size=32, activation='relu', initialization='he', dropout_rate=0.2),
-        LayerConfig(size=16, activation='relu', initialization='he', dropout_rate=0.1),
+        LayerConfig(size=32, activation='leaky_relu', initialization='he', dropout_rate=0.2),
+        LayerConfig(size=32, activation='leaky_relu', initialization='he', dropout_rate=0.2),
+        LayerConfig(size=16, activation='leaky_relu', initialization='he', dropout_rate=0.1),
         LayerConfig(size=2, activation='sigmoid', initialization='xavier')
     ]
     
@@ -135,7 +135,7 @@ def test_spiral_classification():
         
         model = NeuralNetwork(
             layer_configs=layers,
-            optimizer='momentum',
+            optimizer='rmsprop',
             learning_rate=0.01,  # Lower learning rate for stability
             momentum_beta=0.9,
             batch_norm=True,

@@ -8,3 +8,4 @@ lib/lousybookml.egg-info/requires.txt
 lib/lousybookml.egg-info/top_level.txt
 tests/test_linear_regression.py
 tests/test_neural_network.py
+tests/test_reinforcement_learning.py
