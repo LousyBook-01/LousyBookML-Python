@@ -1,0 +1,11 @@
+LICENSE
+README.md
+setup.py
+lib/lousybook01.LousyBookML.egg-info/PKG-INFO
+lib/lousybook01.LousyBookML.egg-info/SOURCES.txt
+lib/lousybook01.LousyBookML.egg-info/dependency_links.txt
+lib/lousybook01.LousyBookML.egg-info/requires.txt
+lib/lousybook01.LousyBookML.egg-info/top_level.txt
+tests/test_linear_regression.py
+tests/test_neural_network.py
+tests/test_reinforcement_learning.py

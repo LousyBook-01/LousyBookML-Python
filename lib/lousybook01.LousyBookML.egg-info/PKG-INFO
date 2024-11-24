@@ -1,3 +1,29 @@
+Metadata-Version: 2.1
+Name: lousybook01.LousyBookML
+Version: 0.5.0b0
+Summary: A comprehensive machine learning library for educational purposes
+Home-page: https://github.com/LousyBook-01/LousyBookML-Python
+Author: LousyBook01
+Author-email: lousybook94@gmail.com
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Anyone
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: gymnasium>=0.29.0
+Requires-Dist: pygame>=2.5.0
+Requires-Dist: matplotlib>=3.7.1
+Provides-Extra: dev
+Requires-Dist: pytest>=7.3.1; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+
 # LousyBookML
 
 A comprehensive Python machine learning library from scratch made by LousyBook01, implementing neural networks, reinforcement learning, and linear regression.
