@@ -2,13 +2,11 @@
 
 import numpy as np
 import pytest
-from LousyBookML.neural_network import NeuralNetwork
+from LousyBookML import NeuralNetwork
 from LousyBookML.neural_network.activations import relu, sigmoid, tanh, softmax, leaky_relu
-from LousyBookML.neural_network.losses import (
-    mean_squared_error, binary_cross_entropy, categorical_cross_entropy
-)
-from LousyBookML.neural_network.utils import normalize_data, one_hot_encode
-from LousyBookML.neural_network.layers import Layer, RepeatedLayer, LayerStack
+from LousyBookML.neural_network.losses import mean_squared_error, binary_crossentropy, categorical_crossentropy
+from LousyBookML.neural_network.model import Layer
+from LousyBookML.neural_network.utils import normalize_data, to_categorical
 
 def test_activation_functions():
     """Test activation functions with various input types and edge cases."""
@@ -51,11 +49,11 @@ def test_losses():
     
     # Test all losses return valid values
     assert isinstance(mean_squared_error(y_true, y_pred), float)
-    assert isinstance(binary_cross_entropy(y_true, y_pred), float)
+    assert isinstance(binary_crossentropy(y_true, y_pred), float)
     
     y_true_cat = np.array([[1,0], [0,1]])
     y_pred_cat = np.array([[0.9,0.1], [0.1,0.9]])
-    assert isinstance(categorical_cross_entropy(y_true_cat, y_pred_cat), float)
+    assert isinstance(categorical_crossentropy(y_true_cat, y_pred_cat), float)
 
 def test_utils():
     """Test utility functions."""
@@ -66,7 +64,7 @@ def test_utils():
     
     # Test one_hot_encode
     y = np.array([0, 1, 2])
-    y_onehot = one_hot_encode(y)
+    y_onehot = to_categorical(y, num_classes=3)
     assert y_onehot.shape == (3, 3)
     assert np.array_equal(np.sum(y_onehot, axis=1), np.ones(3))
 
@@ -145,9 +143,9 @@ def test_model_convergence():
         {'units': 16, 'activation': 'relu'},  # Increased hidden units
         {'units': 8, 'activation': 'relu'},   # Increased hidden units
         {'units': 1, 'activation': 'sigmoid'}
-    ], loss='binary_crossentropy', optimizer='adam', learning_rate=0.01)
+    ], loss='mse', optimizer='adam', learning_rate=0.01)
     
-    history = model.fit(X, y_xor, epochs=5000, batch_size=4, verbose=False)  # More epochs, full batch
+    history = model.fit(X, y_xor, epochs=1000, batch_size=4, verbose=False)  # More epochs, full batch
     
     # Check if loss decreases over time
     first_loss = np.mean(history['loss'][:10])
@@ -222,19 +220,6 @@ def test_layer_configuration():
     history1 = model1.fit(X, y, epochs=1000, batch_size=1, verbose=False)
     assert history1['loss'][-1] < history1['loss'][0]
     
-    # Test with LayerStack and RepeatedLayer
-    model2 = NeuralNetwork(
-        LayerStack([
-            Layer(units=8, activation='relu'),
-            RepeatedLayer(count=2, units=4, activation='relu'),
-            Layer(units=1, activation='sigmoid')
-        ]),
-        loss='binary_crossentropy'
-    )
-    
-    history2 = model2.fit(X, y, epochs=1000, batch_size=1, verbose=False)
-    assert history2['loss'][-1] < history2['loss'][0]
-    
     # Test with traditional dict configuration
     model3 = NeuralNetwork([
         {'units': 8, 'activation': 'relu'},
@@ -246,7 +231,7 @@ def test_layer_configuration():
     assert history3['loss'][-1] < history3['loss'][0]
     
     # Verify all models produce valid predictions
-    for model in [model1, model2, model3]:
+    for model in [model1, model3]:
         pred = model.predict(X)
         assert pred.shape == y.shape
         assert np.all((pred >= 0) & (pred <= 1))
@@ -256,27 +241,47 @@ def test_optimizers():
     # Create XOR dataset
     X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
     y = np.array([[0], [1], [1], [0]])
-    
-    optimizers = ['sgd', 'adam', 'rmsprop']
+
+    optimizers_config = [
+        {'name': 'sgd', 'params': {'momentum': 0.0, 'learning_rate': 0.1}},
+        {'name': 'sgd', 'params': {'momentum': 0.9, 'learning_rate': 0.1}},  # SGD with momentum
+        {'name': 'adam', 'params': {'beta1': 0.9, 'beta2': 0.999, 'learning_rate': 0.01}},
+        {'name': 'rmsprop', 'params': {'decay_rate': 0.9, 'learning_rate': 0.01}}
+    ]
     histories = {}
-    
-    for opt in optimizers:
+
+    for opt_config in optimizers_config:
         # Test each optimizer
         model = NeuralNetwork([
-            {'units': 4, 'activation': 'relu'},
+            {'units': 16, 'activation': 'relu'},  # Increased units for better convergence
+            {'units': 8, 'activation': 'relu'},
             {'units': 1, 'activation': 'sigmoid'}
-        ], optimizer=opt, loss='binary_crossentropy')
-        
-        history = model.fit(X, y, epochs=1000, verbose=False)
-        histories[opt] = history
-        
-        # Check that loss decreased
-        assert history['loss'][-1] < history['loss'][0]
-        
-        # Verify predictions
+        ], optimizer=opt_config['name'], loss='binary_crossentropy', **opt_config['params'])
+
+        history = model.fit(X, y, epochs=2000, batch_size=4, verbose=False)  # Increased epochs, full batch
+        histories[f"{opt_config['name']}_{opt_config['params']}"] = history
+
+        # Verify that loss decreases
+        first_loss = np.mean(history['loss'][:10])
+        last_loss = np.mean(history['loss'][-10:])
+        assert last_loss < first_loss, f"Loss did not decrease for {opt_config['name']} with params {opt_config['params']}"
+
+        # Make predictions
         pred = model.predict(X)
-        assert pred.shape == y.shape
-        assert np.all((pred >= 0) & (pred <= 1))
+        binary_pred = (pred > 0.5).astype(int)
+        
+        # Calculate accuracy
+        accuracy = np.mean(binary_pred == y)
+        assert accuracy > 0.75, f"Low accuracy ({accuracy}) for {opt_config['name']} with params {opt_config['params']}"
+
+    # Verify that SGD with momentum converges faster than without momentum
+    sgd_no_momentum_loss = histories[f"sgd_{{'momentum': 0.0, 'learning_rate': 0.1}}"]['loss']
+    sgd_with_momentum_loss = histories[f"sgd_{{'momentum': 0.9, 'learning_rate': 0.1}}"]['loss']
+    
+    # Compare convergence speed (loss after 200 epochs)
+    early_loss_no_momentum = np.mean(sgd_no_momentum_loss[190:210])
+    early_loss_with_momentum = np.mean(sgd_with_momentum_loss[190:210])
+    assert early_loss_with_momentum < early_loss_no_momentum, "SGD with momentum should converge faster"
 
 def test_leaky_relu():
     """Test leaky ReLU activation."""
@@ -299,3 +304,38 @@ def test_leaky_relu():
     assert output[0] == -0.02  # alpha * -2
     assert output[2] == 0
     assert output[4] == 2
+
+def test_initializers():
+    """Test different weight initialization methods."""
+    X = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
+    y = np.array([[0], [1], [1], [0]])  # XOR function
+    
+    initializers = ['he_normal', 'he_uniform', 'xavier_normal', 'xavier_uniform']
+    
+    for init in initializers:
+        # Test with explicit Layer objects
+        model = NeuralNetwork([
+            Layer(units=16, activation='relu', kernel_initializer=init, seed=42),
+            Layer(units=8, activation='relu', kernel_initializer=init, seed=42),
+            Layer(units=1, activation='sigmoid', kernel_initializer=init, seed=42)
+        ], loss='mse', optimizer='adam', learning_rate=0.01)
+        
+        history = model.fit(X, y, epochs=1000, batch_size=4, verbose=False)
+        
+        # Check if loss decreases over time
+        assert history['loss'][-1] < history['loss'][0]
+        
+        # Test predictions
+        predictions = model.predict(X)
+        binary_pred = (predictions > 0.5).astype(int)
+        assert np.array_equal(binary_pred, y), f"Predictions with {init} initializer do not match expected values"
+        
+        # Test with dictionary configuration
+        model = NeuralNetwork([
+            {'units': 16, 'activation': 'relu', 'kernel_initializer': init},
+            {'units': 8, 'activation': 'relu', 'kernel_initializer': init},
+            {'units': 1, 'activation': 'sigmoid', 'kernel_initializer': init}
+        ], loss='mse', optimizer='adam', learning_rate=0.01)
+        
+        history = model.fit(X, y, epochs=1000, batch_size=4, verbose=False)
+        assert history['loss'][-1] < history['loss'][0]

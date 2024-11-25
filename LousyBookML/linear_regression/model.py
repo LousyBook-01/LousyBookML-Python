@@ -14,8 +14,18 @@ This module provides the core linear regression implementation:
 
 import numpy as np
 from typing import Optional, Tuple, Union, Dict
-from .utils import standardize_data
-from .losses import mean_squared_error, r2_score
+from .utils import standardize_data, add_polynomial_features
+from .losses import mean_squared_error, mean_absolute_error, r2_score
+
+# Re-export all dependencies
+__all__ = [
+    'LinearRegression',
+    'mean_squared_error',
+    'mean_absolute_error',
+    'r2_score',
+    'standardize_data',
+    'add_polynomial_features'
+]
 
 class LinearRegression:
     """

@@ -50,6 +50,26 @@ def normalize_data(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     std[std == 0] = 1  # Avoid division by zero
     return (X - mean) / std, mean, std
 
+def to_categorical(y: np.ndarray, num_classes: int = None) -> np.ndarray:
+    """Convert class vector (integers from 0 to num_classes) to binary class matrix.
+    
+    Args:
+        y: Class vector to be converted into a matrix
+            (integers from 0 to num_classes).
+        num_classes: Total number of classes. If None, this will be inferred
+            from the max value in y.
+            
+    Returns:
+        A binary matrix representation of the input.
+    """
+    y = np.array(y, dtype='int')
+    if not num_classes:
+        num_classes = np.max(y) + 1
+    n = y.shape[0]
+    categorical = np.zeros((n, num_classes))
+    categorical[np.arange(n), y] = 1
+    return categorical
+
 def one_hot_encode(y: np.ndarray, num_classes: Union[int, None] = None) -> np.ndarray:
     """Convert class labels to one-hot encoded format.
     

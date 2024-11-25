@@ -15,7 +15,7 @@ def mean_squared_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
     return np.mean(np.square(y_true - y_pred))
 
-def binary_cross_entropy(y_true: np.ndarray, y_pred: np.ndarray, epsilon: float = 1e-15) -> float:
+def binary_crossentropy(y_true: np.ndarray, y_pred: np.ndarray, epsilon: float = 1e-15) -> float:
     """Binary cross-entropy loss function.
     
     Args:
@@ -29,7 +29,7 @@ def binary_cross_entropy(y_true: np.ndarray, y_pred: np.ndarray, epsilon: float 
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
     return -np.mean(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
 
-def categorical_cross_entropy(y_true: np.ndarray, y_pred: np.ndarray, epsilon: float = 1e-15) -> float:
+def categorical_crossentropy(y_true: np.ndarray, y_pred: np.ndarray, epsilon: float = 1e-15) -> float:
     """Categorical cross-entropy loss function.
     
     Args:
@@ -43,10 +43,14 @@ def categorical_cross_entropy(y_true: np.ndarray, y_pred: np.ndarray, epsilon: f
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
     return -np.mean(np.sum(y_true * np.log(y_pred), axis=1))
 
+# For backward compatibility
+binary_cross_entropy = binary_crossentropy
+categorical_cross_entropy = categorical_crossentropy
+
 # Dictionary mapping loss names to functions
 LOSS_FUNCTIONS: Dict[str, callable] = {
     'mean_squared_error': mean_squared_error,
     'mse': mean_squared_error,
-    'binary_crossentropy': binary_cross_entropy,
-    'categorical_crossentropy': categorical_cross_entropy
+    'binary_crossentropy': binary_crossentropy,
+    'categorical_crossentropy': categorical_crossentropy
 }

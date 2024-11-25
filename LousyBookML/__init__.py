@@ -7,12 +7,8 @@ Made with ❤️ by LousyBook01
 
 __version__ = "0.5.0"
 
-# Linear Regression
-from .linear_regression import (
-    LinearRegression,
-    standardize_data,
-    add_polynomial_features,
-    mean_squared_error,
-    r2_score,
-    mean_absolute_error
-)
+# Import main classes
+from .linear_regression.model import LinearRegression
+from .neural_network.model import NeuralNetwork
+
+__all__ = ['LinearRegression', 'NeuralNetwork']

@@ -162,16 +162,10 @@ def linear_derivative(x: np.ndarray) -> np.ndarray:
 
 # Dictionary mapping activation names to functions
 ACTIVATION_FUNCTIONS = {
-    'relu': relu,
-    'relu_derivative': relu_derivative,
-    'sigmoid': sigmoid,
-    'sigmoid_derivative': sigmoid_derivative,
-    'tanh': tanh,
-    'tanh_derivative': tanh_derivative,
-    'softmax': softmax,
-    'softmax_derivative': softmax_derivative,
-    'leaky_relu': leaky_relu,
-    'leaky_relu_derivative': leaky_relu_derivative,
-    'linear': linear,
-    'linear_derivative': linear_derivative
+    'relu': {'forward': relu, 'backward': relu_derivative},
+    'sigmoid': {'forward': sigmoid, 'backward': sigmoid_derivative},
+    'tanh': {'forward': tanh, 'backward': tanh_derivative},
+    'softmax': {'forward': softmax, 'backward': softmax_derivative},
+    'leaky_relu': {'forward': leaky_relu, 'backward': leaky_relu_derivative},
+    'linear': {'forward': linear, 'backward': linear_derivative}
 }

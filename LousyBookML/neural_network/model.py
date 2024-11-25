@@ -1,270 +1,241 @@
-"""
-LousyBookML - A Machine Learning Library by LousyBook01
-www.youtube.com/@LousyBook01
-
-Made with ❤️ by LousyBook01
-
-The Neural Network Model Module
-This module provides the core neural network implementation:
-- Feed-forward Neural Networks
-- Customizable Layer Architecture
-- Multiple Activation Functions
-- Mini-batch Training Support
-"""
+"""Neural network model implementation."""
 
 import numpy as np
-from typing import List, Dict, Union, Optional, Tuple
+from typing import List, Union, Dict, Any, Optional, Tuple
 from .activations import ACTIVATION_FUNCTIONS
 from .losses import LOSS_FUNCTIONS
-from .layers import Layer, RepeatedLayer, LayerStack
-from .optimizers import SGD, Adam, RMSprop
+from .optimizers import OPTIMIZERS
+from .initializers import INITIALIZERS
+
+class Layer:
+    """Neural network layer."""
+    
+    def __init__(self, units: int, activation: str = 'linear', 
+                 kernel_initializer: str = 'xavier_uniform', seed: Optional[int] = None,
+                 batch_norm: bool = False):
+        self.units = units
+        self.activation = activation
+        self.kernel_initializer = kernel_initializer
+        self.seed = seed
+        self.batch_norm = batch_norm
+        
+        if activation not in ACTIVATION_FUNCTIONS:
+            raise ValueError(f"Unknown activation function: {activation}")
+        if kernel_initializer not in INITIALIZERS:
+            raise ValueError(f"Unknown initializer: {kernel_initializer}")
+            
+        self.activation_fn = ACTIVATION_FUNCTIONS[activation]['forward']
+        self.activation_derivative = ACTIVATION_FUNCTIONS[activation]['backward']
+        self.initializer = INITIALIZERS[kernel_initializer]
+        
+        self.weights = None
+        self.bias = None
+        self.input = None
+        self.output = None
+        
+        # Batch normalization parameters
+        if batch_norm:
+            self.gamma = None  # Scale parameter
+            self.beta = None   # Shift parameter
+            self.running_mean = None
+            self.running_var = None
+            self.epsilon = 1e-8
+            self.momentum = 0.99
+        
+    def initialize(self, input_shape: int):
+        self.weights = self.initializer((input_shape, self.units), seed=self.seed)
+        self.bias = np.zeros((1, self.units))
+        
+        if self.batch_norm:
+            self.gamma = np.ones((1, self.units))
+            self.beta = np.zeros((1, self.units))
+            self.running_mean = np.zeros((1, self.units))
+            self.running_var = np.ones((1, self.units))
+        
+    def forward(self, X: np.ndarray, training: bool = True) -> np.ndarray:
+        self.input = X
+        output = np.dot(X, self.weights) + self.bias
+        
+        if self.batch_norm:
+            if training:
+                # Calculate mean and variance for current batch
+                batch_mean = np.mean(output, axis=0, keepdims=True)
+                batch_var = np.var(output, axis=0, keepdims=True) + self.epsilon
+                
+                # Update running statistics
+                self.running_mean = (self.momentum * self.running_mean + 
+                                   (1 - self.momentum) * batch_mean)
+                self.running_var = (self.momentum * self.running_var + 
+                                  (1 - self.momentum) * batch_var)
+                
+                # Normalize
+                normalized = (output - batch_mean) / np.sqrt(batch_var)
+            else:
+                # Use running statistics for inference
+                normalized = ((output - self.running_mean) / 
+                            np.sqrt(self.running_var + self.epsilon))
+            
+            # Scale and shift
+            output = self.gamma * normalized + self.beta
+        
+        self.output = self.activation_fn(output)
+        return self.output
 
 class NeuralNetwork:
-    """A flexible implementation of a feed-forward neural network.
-    
-    Attributes:
-        architecture (List[Dict]): List of layer configurations
-        learning_rate (float): Learning rate for gradient descent
-        parameters (Dict): Weight and bias matrices for each layer
-        cache (Dict): Cache for forward and backward passes
-        _initialized (bool): Whether the network is initialized
-        loss_name (str): Loss function name
-        loss_function (callable): Loss function
-        optimizer: Optimizer instance
-        
-    Example:
-        >>> # Using the new layer configuration system
-        >>> model = NeuralNetwork(
-        ...     LayerStack([
-        ...         Layer(units=64, activation='relu'),
-        ...         RepeatedLayer(count=2, units=32, activation='relu'),
-        ...         Layer(units=1, activation='sigmoid')
-        ...     ]),
-        ...     loss='binary_crossentropy',
-        ...     optimizer='adam',
-        ...     learning_rate=0.001
-        ... )
-        >>> model.fit(X_train, y_train, epochs=100)
-        
-        >>> # Using the traditional dictionary-based configuration
-        >>> model = NeuralNetwork([
-        ...     {'units': 64, 'activation': 'relu'},
-        ...     {'units': 1, 'activation': 'sigmoid'}
-        ... ])
-    """
-    
     def __init__(self, 
-                 architecture: Union[LayerStack, List[Dict[str, Union[int, str]]], List[Layer]], 
+                 architecture: Union[List[Dict[str, Union[int, str]]], List[Layer]],
                  loss: str = 'mean_squared_error',
                  optimizer: str = 'sgd',
                  learning_rate: float = 0.01,
                  **optimizer_params):
-        """Initialize the neural network.
+        self.layers = []
+        
+        # Process architecture
+        for layer_config in architecture:
+            if isinstance(layer_config, Layer):
+                self.layers.append(layer_config)
+            elif isinstance(layer_config, dict):
+                self.layers.append(Layer(**layer_config))
+            else:
+                raise ValueError("Layer configuration must be a Layer object or dictionary")
+        
+        # Set up loss function
+        if loss not in LOSS_FUNCTIONS:
+            raise ValueError(f"Unknown loss function: {loss}")
+        self.loss_fn = LOSS_FUNCTIONS[loss]
+        
+        # Set up optimizer
+        if optimizer not in OPTIMIZERS:
+            raise ValueError(f"Unknown optimizer: {optimizer}")
+        optimizer_class = OPTIMIZERS[optimizer]
+        self.optimizer = optimizer_class(learning_rate=learning_rate, **optimizer_params)
+        
+    def initialize(self, input_shape: int):
+        """Initialize network weights.
         
         Args:
-            architecture: Network architecture specification. Can be:
-                - LayerStack object
-                - List of Layer objects
-                - List of layer configuration dictionaries
-            loss: Loss function name
-            optimizer: Optimizer name ('sgd', 'adam', or 'rmsprop')
-            learning_rate: Learning rate for the optimizer
-            **optimizer_params: Additional optimizer parameters (e.g., momentum, beta1, beta2)
+            input_shape: Number of input features
         """
-        self.architecture = self._process_architecture(architecture)
-        self.loss_name = loss
-        self.loss_function = LOSS_FUNCTIONS[loss]
-        
-        # Initialize optimizer
-        optimizer = optimizer.lower()
-        if optimizer == 'sgd':
-            self.optimizer = SGD(learning_rate=learning_rate, 
-                               momentum=optimizer_params.get('momentum', 0.0))
-        elif optimizer == 'adam':
-            self.optimizer = Adam(learning_rate=learning_rate,
-                                beta1=optimizer_params.get('beta1', 0.9),
-                                beta2=optimizer_params.get('beta2', 0.999),
-                                epsilon=optimizer_params.get('epsilon', 1e-8))
-        elif optimizer == 'rmsprop':
-            self.optimizer = RMSprop(learning_rate=learning_rate,
-                                   decay_rate=optimizer_params.get('decay_rate', 0.9),
-                                   epsilon=optimizer_params.get('epsilon', 1e-8))
-        else:
-            raise ValueError(f"Unsupported optimizer: {optimizer}")
-        
-        self.parameters = {}
-        self.cache = {}
-        self._initialized = False
-
-    def _process_architecture(self, architecture):
-        """Convert architecture to standard format."""
-        if isinstance(architecture, LayerStack):
-            return architecture.to_architecture()
-        elif isinstance(architecture, list):
-            if all(isinstance(layer, Layer) for layer in architecture):
-                return [layer.to_dict() for layer in architecture]
-            return architecture
-        raise ValueError("Architecture must be LayerStack, list of Layers, or list of dicts")
-
-    def initialize_parameters(self, input_dim: int) -> None:
-        """Initialize network parameters.
-        
-        Args:
-            input_dim: Dimension of input features
-        """
-        prev_units = input_dim
-        
-        for i, layer in enumerate(self.architecture):
-            units = layer['units']
-            # He initialization
-            self.parameters[f'W{i+1}'] = np.random.randn(prev_units, units) * np.sqrt(2. / prev_units)
-            self.parameters[f'b{i+1}'] = np.zeros((1, units))
-            prev_units = units
-        
-        self._initialized = True
-
-    def fit(self, 
-           X: np.ndarray, 
-           y: np.ndarray, 
-           epochs: int = 100,
-           batch_size: Optional[int] = None,
-           validation_data: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-           verbose: bool = True) -> Dict[str, List[float]]:
-        """Train the neural network.
-        
-        Args:
-            X: Input features
-            y: Target values
-            epochs: Number of training epochs
-            batch_size: Size of each training batch
-            validation_data: Tuple of (X_val, y_val) for validation
-            verbose: Whether to print training progress
+        current_shape = input_shape
+        for layer in self.layers:
+            layer.initialize(current_shape)
+            current_shape = layer.units
             
-        Returns:
-            Dictionary containing training history
-        """
-        if not self._initialized:
-            self.initialize_parameters(X.shape[1])
-        
-        history = {'loss': [], 'val_loss': []}
-        n_samples = X.shape[0]
-        batch_size = batch_size or n_samples
-        
-        for epoch in range(epochs):
-            for i in range(0, n_samples, batch_size):
-                batch_X = X[i:i + batch_size]
-                batch_y = y[i:i + batch_size]
-                
-                # Forward pass
-                self._forward(batch_X)
-                
-                # Backward pass
-                gradients = self._backward(batch_X, batch_y)
-                
-                # Update parameters
-                self._update_parameters(gradients)
-            
-            # Compute training loss
-            predictions = self.predict(X)
-            loss = self.loss_function(y, predictions)
-            history['loss'].append(loss)
-            
-            # Compute validation loss if provided
-            if validation_data is not None:
-                val_pred = self.predict(validation_data[0])
-                val_loss = self.loss_function(validation_data[1], val_pred)
-                history['val_loss'].append(val_loss)
-            
-            if verbose and (epoch + 1) % 10 == 0:
-                log_msg = f"Epoch {epoch + 1}/{epochs}, Loss: {loss:.4f}"
-                if validation_data is not None:
-                    log_msg += f", Val Loss: {val_loss:.4f}"
-                print(log_msg)
-        
-        return history
-
-    def _forward(self, X: np.ndarray) -> None:
+    def forward(self, X: np.ndarray) -> np.ndarray:
         """Forward pass through the network.
         
         Args:
-            X: Input features
+            X: Input data
             
         Returns:
             Network output
         """
-        self.cache = {}
-        self.cache['A0'] = X
-        
-        for i, layer in enumerate(self.architecture, 1):
-            W = self.parameters[f'W{i}']
-            b = self.parameters[f'b{i}']
-            
-            # Linear transformation
-            Z = np.dot(self.cache[f'A{i-1}'], W) + b
-            self.cache[f'Z{i}'] = Z
-            
-            # Activation
-            activation_fn = ACTIVATION_FUNCTIONS[layer['activation']]
-            A = activation_fn(Z)
-            self.cache[f'A{i}'] = A
-        
-        return self.cache[f'A{len(self.architecture)}']
-
-    def _backward(self, X: np.ndarray, y: np.ndarray) -> Dict[str, np.ndarray]:
-        """Backward pass to compute gradients.
+        current_output = X
+        for layer in self.layers:
+            current_output = layer.forward(current_output)
+        return current_output
+    
+    def fit(self, X: np.ndarray, y: np.ndarray, epochs: int = 1000, 
+            batch_size: Optional[int] = None, verbose: bool = True,
+            validation_data: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+            early_stopping_patience: int = None,
+            early_stopping_min_delta: float = 1e-4):
+        """Train the network.
         
         Args:
-            X: Input features
+            X: Training data
             y: Target values
+            epochs: Number of training epochs
+            batch_size: Size of mini-batches (None for full batch)
+            verbose: Whether to print progress
+            validation_data: Optional tuple of (X_val, y_val) for validation
+            early_stopping_patience: Number of epochs with no improvement after which training will be stopped
+            early_stopping_min_delta: Minimum change in loss to qualify as an improvement
             
         Returns:
-            Dictionary of gradients
+            Dictionary containing training history
         """
-        m = X.shape[0]
-        gradients = {}
-        
-        # Get the derivative of the loss with respect to the output
-        if self.loss_name == 'categorical_crossentropy' and self.architecture[-1]['activation'] == 'softmax':
-            dA = self.cache[f'A{len(self.architecture)}'] - y
-        else:
-            dZ = self.cache[f'A{len(self.architecture)}'] - y
-            dA = dZ * ACTIVATION_FUNCTIONS[self.architecture[-1]['activation'] + '_derivative'](self.cache[f'Z{len(self.architecture)}'])
-        
-        for layer in range(len(self.architecture), 0, -1):
-            current_cache = self.cache[f'A{layer-1}']
+        if self.layers[0].weights is None:
+            self.initialize(X.shape[1])
             
-            # Calculate gradients
-            gradients[f'dW{layer}'] = (1/m) * np.dot(current_cache.T, dA)
-            gradients[f'db{layer}'] = (1/m) * np.sum(dA, axis=0, keepdims=True)
+        history = {'loss': []}
+        if validation_data is not None:
+            history['val_loss'] = []
             
-            if layer > 1:
-                dZ = np.dot(dA, self.parameters[f'W{layer}'].T)
-                activation = self.architecture[layer-2]['activation']
-                dA = dZ * ACTIVATION_FUNCTIONS[activation + '_derivative'](self.cache[f'Z{layer-1}'])
+        n_samples = X.shape[0]
+        batch_size = n_samples if batch_size is None else batch_size
         
-        return gradients
-
-    def _update_parameters(self, gradients: Dict[str, np.ndarray]) -> None:
-        """Update network parameters using the optimizer.
+        # Early stopping setup
+        if early_stopping_patience is not None:
+            best_loss = float('inf')
+            patience_counter = 0
+            
+        # Pre-compute batch indices for faster iteration
+        n_batches = (n_samples + batch_size - 1) // batch_size
+        batch_indices = [(i * batch_size, min((i + 1) * batch_size, n_samples)) 
+                        for i in range(n_batches)]
         
-        Args:
-            gradients: Dictionary of gradients
-        """
-        # Update parameters using the optimizer
-        updated_params = self.optimizer.update(self.parameters, gradients)
+        # Shuffle indices for random batch selection
+        indices = np.arange(n_samples)
         
-        # Update the network parameters
-        self.parameters.update(updated_params)
-
+        for epoch in range(epochs):
+            # Shuffle data at each epoch
+            np.random.shuffle(indices)
+            X = X[indices]
+            y = y[indices]
+            
+            # Mini-batch training with vectorized operations
+            epoch_loss = 0
+            for start_idx, end_idx in batch_indices:
+                batch_X = X[start_idx:end_idx]
+                batch_y = y[start_idx:end_idx]
+                
+                # Forward pass
+                predictions = self.forward(batch_X)
+                
+                # Update weights
+                self.optimizer.step(self.layers, batch_X, batch_y, predictions)
+                
+                # Accumulate loss
+                epoch_loss += self.loss_fn(batch_y, predictions) * (end_idx - start_idx)
+            
+            # Compute average epoch loss
+            epoch_loss /= n_samples
+            history['loss'].append(epoch_loss)
+            
+            # Compute validation loss if provided
+            if validation_data is not None:
+                val_pred = self.forward(validation_data[0])
+                val_loss = self.loss_fn(validation_data[1], val_pred)
+                history['val_loss'].append(val_loss)
+                
+                # Early stopping check
+                if early_stopping_patience is not None:
+                    if val_loss < best_loss - early_stopping_min_delta:
+                        best_loss = val_loss
+                        patience_counter = 0
+                    else:
+                        patience_counter += 1
+                        if patience_counter >= early_stopping_patience:
+                            if verbose:
+                                print(f"Early stopping triggered after {epoch + 1} epochs")
+                            break
+            
+            if verbose and (epoch + 1) % 100 == 0:
+                log_msg = f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}"
+                if validation_data is not None:
+                    log_msg += f", Val Loss: {val_loss:.4f}"
+                print(log_msg)
+                
+        return history
+    
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Make predictions.
         
         Args:
-            X: Input features
+            X: Input data
             
         Returns:
-            Model predictions
+            Predictions
         """
-        if not self._initialized:
-            raise ValueError("Model must be trained before making predictions")
-        return self._forward(X)
+        return self.forward(X)
