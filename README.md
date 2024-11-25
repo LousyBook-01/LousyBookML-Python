@@ -2,6 +2,10 @@
 
 A comprehensive Python machine learning library from scratch made by LousyBook01, implementing neural networks, reinforcement learning, and linear regression.
 
+Made with ❤️ by [LousyBook01](www.youtube.com/@LousyBook01) a 13 year old kid, who loves to code.
+Some help was given by Codeium's new Windsurf IDE with Cascade and Claude.
+
+
 ## Features
 
 - Reinforcement Learning
