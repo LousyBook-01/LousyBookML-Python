@@ -1,4 +1,24 @@
-"""Weight initialization methods for neural networks."""
+"""
+LousyBookML - A Machine Learning Library by LousyBook01
+www.youtube.com/@LousyBook01
+
+Made with ❤️ by LousyBook01
+
+The Neural Network Weight Initializers Module
+This module provides weight initialization methods for neural networks:
+- He Normal/Uniform (for ReLU networks)
+- Xavier/Glorot Normal/Uniform (for tanh/sigmoid networks)
+- Random Normal/Uniform
+
+Example:
+    >>> from LousyBookML.neural_network.initializers import he_normal
+    >>> # Initialize weights for a layer with 784 inputs and 128 neurons
+    >>> weights = he_normal((784, 128))  # Good for ReLU activation
+    >>> 
+    >>> from LousyBookML.neural_network.initializers import xavier_uniform
+    >>> # Initialize weights for a layer with tanh activation
+    >>> weights = xavier_uniform((128, 64))  # Good for tanh/sigmoid
+"""
 
 import numpy as np
 from typing import Tuple

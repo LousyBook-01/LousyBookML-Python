@@ -146,140 +146,76 @@ class SGD:
                 layer.beta = params[f'beta{i+1}']
 
 class Adam:
-    """Adam optimizer.
-    
-    Implements the Adam update rule:
-    m = beta1 * m + (1 - beta1) * gradient
-    v = beta2 * v + (1 - beta2) * gradient^2
-    w = w - learning_rate * m / sqrt(v + epsilon)
-    
-    Args:
-        learning_rate: Learning rate (step size) for optimization.
-        beta1: Beta1 coefficient (0 <= beta1 < 1).
-        beta2: Beta2 coefficient (0 <= beta2 < 1).
-        epsilon: Small value for numerical stability.
-        
-    Example:
-        >>> optimizer = Adam(learning_rate=0.001, beta1=0.9, beta2=0.999)
-        >>> optimizer.initialize(model.get_parameters())
-        >>> for epoch in range(epochs):
-        ...     predictions = model.forward(X)
-        ...     optimizer.step(model.layers, X, y, predictions)
+    """Adam optimizer implementation.
+
+    This optimizer implements the Adam algorithm as described in 
+    'Adam: A Method for Stochastic Optimization' by Kingma and Ba (2014).
     """
     
-    def __init__(self, learning_rate: float = 0.001, 
-                 beta1: float = 0.9, 
-                 beta2: float = 0.999, 
-                 epsilon: float = 1e-8):
+    def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, clip_value=5.0):
         self.learning_rate = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
+        self.clip_value = clip_value  # Maximum allowed gradient value
         self.m = {}  # First moment estimates
         self.v = {}  # Second moment estimates
         self.t = 0   # Time step
-    
-    def initialize(self, params: Dict[str, np.ndarray]) -> None:
-        """Initialize moment estimates.
         
-        Args:
-            params: Dictionary of parameters to optimize.
-        """
-        self.m = {key: np.zeros_like(value) for key, value in params.items()}
-        self.v = {key: np.zeros_like(value) for key, value in params.items()}
-    
-    def compute_gradients(self, layers: List[Any], X: np.ndarray, 
-                         y: np.ndarray, predictions: np.ndarray) -> Dict[str, np.ndarray]:
-        """Compute gradients using backpropagation.
-        
-        Args:
-            layers: List of network layers.
-            X: Input data.
-            y: Target values.
-            predictions: Network predictions.
-            
-        Returns:
-            Dictionary containing gradients for each parameter.
-        """
-        m = X.shape[0]
-        n_layers = len(layers)
-        grads = {}
-        
-        # Compute output layer error
-        error = predictions - y
-        
-        # Backpropagate through layers
-        for i in reversed(range(n_layers)):
-            layer = layers[i]
-            
-            # Compute activation gradient
-            if i == n_layers - 1:
-                delta = error * layer.activation_derivative(layer.output)
-            else:
-                delta = np.dot(delta, layers[i+1].weights.T) * layer.activation_derivative(layer.output)
-            
-            # Compute weight and bias gradients
-            grads[f'dW{i+1}'] = np.dot(layer.input.T, delta) / m
-            grads[f'db{i+1}'] = np.sum(delta, axis=0, keepdims=True) / m
-            
-            # Compute batch normalization gradients if applicable
-            if layer.batch_norm:
-                grads[f'dgamma{i+1}'] = np.sum(delta * layer.normalized_input, axis=0, keepdims=True) / m
-                grads[f'dbeta{i+1}'] = np.sum(delta, axis=0, keepdims=True) / m
-        
-        return grads
-    
-    def step(self, layers: List[Any], X: np.ndarray, 
-             y: np.ndarray, predictions: np.ndarray) -> None:
+    def step(self, layers, X, y, predictions):
         """Update parameters using Adam optimization.
         
         Args:
-            layers: List of network layers.
-            X: Input data.
-            y: Target values.
-            predictions: Network predictions.
+            layers: List of network layers
+            X: Input data
+            y: True labels
+            predictions: Model predictions
         """
-        # Get parameter dictionary
-        params = {}
-        for i, layer in enumerate(layers):
-            params[f'W{i+1}'] = layer.weights
-            params[f'b{i+1}'] = layer.bias
-            if layer.batch_norm:
-                params[f'gamma{i+1}'] = layer.gamma
-                params[f'beta{i+1}'] = layer.beta
+        if not self.m:  # Initialize moment estimates on first update
+            for layer in layers:
+                if hasattr(layer, 'weights'):
+                    self.m[f'weights_{id(layer)}'] = np.zeros_like(layer.weights)
+                    self.m[f'bias_{id(layer)}'] = np.zeros_like(layer.bias)
+                    self.v[f'weights_{id(layer)}'] = np.zeros_like(layer.weights)
+                    self.v[f'bias_{id(layer)}'] = np.zeros_like(layer.bias)
         
-        # Initialize moment estimates if needed
-        if not self.m or not self.v:
-            self.initialize(params)
-        
-        # Increment time step
         self.t += 1
         
         # Compute gradients
-        grads = self.compute_gradients(layers, X, y, predictions)
+        grad = layers[-1].backward(predictions - y)  # Use MSE derivative
+        for i in range(len(layers)-2, -1, -1):
+            grad = layers[i].backward(grad)
         
-        # Update parameters
-        for key in params:
-            # Update biased first moment estimate
-            self.m[key] = self.beta1 * self.m[key] + (1 - self.beta1) * grads[f'd{key}']
-            # Update biased second raw moment estimate
-            self.v[key] = self.beta2 * self.v[key] + (1 - self.beta2) * np.square(grads[f'd{key}'])
-            
-            # Compute bias-corrected first moment estimate
-            m_hat = self.m[key] / (1 - self.beta1**self.t)
-            # Compute bias-corrected second raw moment estimate
-            v_hat = self.v[key] / (1 - self.beta2**self.t)
-            
-            # Update parameters
-            params[key] -= (self.learning_rate * m_hat) / (np.sqrt(v_hat) + self.epsilon)
-        
-        # Update layers with new parameters
-        for i, layer in enumerate(layers):
-            layer.weights = params[f'W{i+1}']
-            layer.bias = params[f'b{i+1}']
-            if layer.batch_norm:
-                layer.gamma = params[f'gamma{i+1}']
-                layer.beta = params[f'beta{i+1}']
+        # Update each layer's parameters
+        for layer in layers:
+            if hasattr(layer, 'weights'):
+                # Get layer gradients
+                dw = np.clip(layer.grad_weights, -self.clip_value, self.clip_value)  # Clip gradients
+                db = np.clip(layer.grad_bias, -self.clip_value, self.clip_value)     # Clip gradients
+                
+                # Update moment estimates for weights
+                key_w = f'weights_{id(layer)}'
+                key_b = f'bias_{id(layer)}'
+                
+                # Update biased first moment estimates
+                self.m[key_w] = self.beta1 * self.m[key_w] + (1 - self.beta1) * dw
+                self.m[key_b] = self.beta1 * self.m[key_b] + (1 - self.beta1) * db
+                
+                # Update biased second raw moment estimates
+                self.v[key_w] = self.beta2 * self.v[key_w] + (1 - self.beta2) * np.square(dw)
+                self.v[key_b] = self.beta2 * self.v[key_b] + (1 - self.beta2) * np.square(db)
+                
+                # Compute bias-corrected first moment estimates
+                m_hat_w = self.m[key_w] / (1 - self.beta1**self.t)
+                m_hat_b = self.m[key_b] / (1 - self.beta1**self.t)
+                
+                # Compute bias-corrected second raw moment estimates
+                v_hat_w = self.v[key_w] / (1 - self.beta2**self.t)
+                v_hat_b = self.v[key_b] / (1 - self.beta2**self.t)
+                
+                # Update parameters
+                layer.weights -= self.learning_rate * m_hat_w / (np.sqrt(v_hat_w) + self.epsilon)
+                layer.bias -= self.learning_rate * m_hat_b / (np.sqrt(v_hat_b) + self.epsilon)
 
 class RMSprop:
     """RMSprop optimizer.

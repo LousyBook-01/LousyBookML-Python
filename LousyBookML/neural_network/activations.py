@@ -132,25 +132,25 @@ def leaky_relu(x: np.ndarray, alpha: float = 0.01) -> np.ndarray:
     """Leaky ReLU activation function.
     
     Args:
-        x: Input tensor
-        alpha: Slope for negative values (default: 0.01)
-    
+        x (np.ndarray): Input array
+        alpha (float): Slope for negative values. Default is 0.01
+        
     Returns:
-        Output tensor with leaky ReLU activation applied
+        np.ndarray: Output array after applying Leaky ReLU
     """
     return np.where(x > 0, x, alpha * x)
 
 def leaky_relu_derivative(x: np.ndarray, alpha: float = 0.01) -> np.ndarray:
-    """Derivative of leaky ReLU activation function.
+    """Derivative of Leaky ReLU activation function.
     
     Args:
-        x: Input tensor
-        alpha: Slope for negative values (default: 0.01)
-    
+        x (np.ndarray): Input array
+        alpha (float): Slope for negative values. Default is 0.01
+        
     Returns:
-        Derivative of leaky ReLU at input points
+        np.ndarray: Derivative of Leaky ReLU
     """
-    return np.where(x > 0, 1.0, alpha)
+    return np.where(x > 0, 1, alpha)
 
 def linear(x: np.ndarray) -> np.ndarray:
     """Linear activation function."""
@@ -160,12 +160,12 @@ def linear_derivative(x: np.ndarray) -> np.ndarray:
     """Derivative of linear activation function."""
     return np.ones_like(x)
 
-# Dictionary mapping activation names to functions
+# Dictionary mapping activation function names to their forward and backward functions
 ACTIVATION_FUNCTIONS = {
-    'relu': {'forward': relu, 'backward': relu_derivative},
-    'sigmoid': {'forward': sigmoid, 'backward': sigmoid_derivative},
-    'tanh': {'forward': tanh, 'backward': tanh_derivative},
-    'softmax': {'forward': softmax, 'backward': softmax_derivative},
-    'leaky_relu': {'forward': leaky_relu, 'backward': leaky_relu_derivative},
-    'linear': {'forward': linear, 'backward': linear_derivative}
+    'sigmoid': (sigmoid, sigmoid_derivative),
+    'tanh': (tanh, tanh_derivative),
+    'relu': (relu, relu_derivative),
+    'leaky_relu': (leaky_relu, leaky_relu_derivative),
+    'softmax': (softmax, softmax_derivative),
+    'linear': (linear, linear_derivative)
 }

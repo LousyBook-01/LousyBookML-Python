@@ -1,4 +1,27 @@
-"""Neural network model implementation."""
+"""
+LousyBookML - A Machine Learning Library by LousyBook01
+www.youtube.com/@LousyBook01
+
+Made with ❤️ by LousyBook01
+
+The Neural Network Model Module
+This module provides the core neural network implementation:
+- Layer class for neural network layers
+- NeuralNetwork class for building and training networks
+- Support for various layer types and configurations
+- Batch normalization capability
+- Mini-batch training with optimizers
+
+Example:
+    >>> from LousyBookML.neural_network.model import NeuralNetwork
+    >>> model = NeuralNetwork([
+    ...     {'units': 64, 'activation': 'relu'},
+    ...     {'units': 32, 'activation': 'relu'},
+    ...     {'units': 10, 'activation': 'softmax'}
+    ... ])
+    >>> model.fit(X_train, y_train, epochs=100, batch_size=32)
+    >>> predictions = model.predict(X_test)
+"""
 
 import numpy as np
 from typing import List, Union, Dict, Any, Optional, Tuple
@@ -8,9 +31,34 @@ from .optimizers import OPTIMIZERS
 from .initializers import INITIALIZERS
 
 class Layer:
-    """Neural network layer."""
+    """Neural network layer with optional batch normalization.
     
-    def __init__(self, units: int, activation: str = 'linear', 
+    A fully connected layer that performs:
+    output = activation(gamma * normalize(W * x + b) + beta) if batch_norm
+    output = activation(W * x + b) otherwise
+    
+    Args:
+        units: Number of neurons in the layer
+        activation: Activation function name ('relu', 'sigmoid', etc.)
+        kernel_initializer: Weight initialization method
+        seed: Random seed for reproducibility
+        batch_norm: Whether to use batch normalization
+        
+    Attributes:
+        weights: Weight matrix of shape (input_dim, units)
+        bias: Bias vector of shape (1, units)
+        gamma: Batch norm scaling parameter
+        beta: Batch norm shift parameter
+        running_mean: Running mean for batch norm inference
+        running_var: Running variance for batch norm inference
+        
+    Example:
+        >>> layer = Layer(64, activation='relu', batch_norm=True)
+        >>> layer.initialize(input_shape=128)
+        >>> output = layer.forward(input_data)
+    """
+    
+    def __init__(self, units: int, activation: str = 'relu', 
                  kernel_initializer: str = 'xavier_uniform', seed: Optional[int] = None,
                  batch_norm: bool = False):
         self.units = units
@@ -19,19 +67,20 @@ class Layer:
         self.seed = seed
         self.batch_norm = batch_norm
         
-        if activation not in ACTIVATION_FUNCTIONS:
-            raise ValueError(f"Unknown activation function: {activation}")
-        if kernel_initializer not in INITIALIZERS:
-            raise ValueError(f"Unknown initializer: {kernel_initializer}")
-            
-        self.activation_fn = ACTIVATION_FUNCTIONS[activation]['forward']
-        self.activation_derivative = ACTIVATION_FUNCTIONS[activation]['backward']
+        # Get activation function and its derivative
+        activation_pair = ACTIVATION_FUNCTIONS[activation]
+        self.activation_fn = activation_pair[0]  # Forward function
+        self.activation_derivative = activation_pair[1]  # Backward function
+        
         self.initializer = INITIALIZERS[kernel_initializer]
         
         self.weights = None
         self.bias = None
         self.input = None
         self.output = None
+        self.normalized_input = None
+        self.grad_weights = None
+        self.grad_bias = None
         
         # Batch normalization parameters
         if batch_norm:
@@ -69,19 +118,95 @@ class Layer:
                                   (1 - self.momentum) * batch_var)
                 
                 # Normalize
-                normalized = (output - batch_mean) / np.sqrt(batch_var)
+                self.normalized_input = (output - batch_mean) / np.sqrt(batch_var)
             else:
                 # Use running statistics for inference
-                normalized = ((output - self.running_mean) / 
+                self.normalized_input = ((output - self.running_mean) / 
                             np.sqrt(self.running_var + self.epsilon))
             
             # Scale and shift
-            output = self.gamma * normalized + self.beta
+            output = self.gamma * self.normalized_input + self.beta
         
         self.output = self.activation_fn(output)
         return self.output
+    
+    def backward(self, grad: np.ndarray) -> np.ndarray:
+        """Compute gradients using backpropagation.
+        
+        Args:
+            grad: Gradient from previous layer
+            
+        Returns:
+            Gradient for this layer
+        """
+        if self.batch_norm:
+            # Backpropagate through batch norm
+            grad_gamma = np.sum(grad * self.normalized_input, axis=0, keepdims=True)
+            grad_beta = np.sum(grad, axis=0, keepdims=True)
+            
+            # Update gradients
+            self.gamma -= grad_gamma
+            self.beta -= grad_beta
+            
+            # Backpropagate through normalization
+            grad_normalized = grad * self.gamma
+            grad_mean = np.sum(grad_normalized * (-1 / np.sqrt(self.running_var + self.epsilon)), axis=0, keepdims=True)
+            grad_var = np.sum(grad_normalized * (-0.5) * (self.normalized_input / (self.running_var + self.epsilon)), axis=0, keepdims=True)
+            
+            # Backpropagate through mean and variance
+            grad_input = (grad_normalized / np.sqrt(self.running_var + self.epsilon)) + (grad_mean / self.input.shape[0]) + (2 * grad_var * self.normalized_input / self.input.shape[0])
+        else:
+            grad_input = grad
+        
+        # Backpropagate through activation
+        grad_activated = grad_input * self.activation_derivative(self.output)
+        
+        # Compute gradients for weights and bias
+        self.grad_weights = np.dot(self.input.T, grad_activated)
+        self.grad_bias = np.sum(grad_activated, axis=0, keepdims=True)
+        
+        # Compute gradient for next layer
+        grad_next = np.dot(grad_activated, self.weights.T)
+        
+        return grad_next
 
 class NeuralNetwork:
+    """Neural network model with configurable architecture and training options.
+    
+    A flexible neural network implementation that supports:
+    - Multiple layers with different activations
+    - Various optimizers (SGD, Adam)
+    - Batch normalization
+    - Early stopping
+    - Mini-batch training
+    - Validation during training
+    
+    Args:
+        architecture: List of layer configurations or Layer objects
+        loss: Loss function name ('mean_squared_error', 'categorical_crossentropy', etc.)
+        optimizer: Optimizer name ('sgd', 'adam')
+        learning_rate: Learning rate for the optimizer
+        **optimizer_params: Additional parameters for the optimizer
+        
+    Attributes:
+        layers: List of Layer objects forming the network
+        loss_fn: Loss function for training
+        optimizer: Optimizer instance for updating weights
+        
+    Example:
+        >>> # Create a simple classifier
+        >>> model = NeuralNetwork([
+        ...     {'units': 128, 'activation': 'relu'},
+        ...     {'units': 10, 'activation': 'softmax'}
+        ... ], loss='categorical_crossentropy', optimizer='adam')
+        >>> 
+        >>> # Train the model
+        >>> history = model.fit(X_train, y_train, 
+        ...                    epochs=100, 
+        ...                    batch_size=32,
+        ...                    validation_data=(X_val, y_val))
+    """
+    
     def __init__(self, 
                  architecture: Union[List[Dict[str, Union[int, str]]], List[Layer]],
                  loss: str = 'mean_squared_error',
@@ -102,7 +227,9 @@ class NeuralNetwork:
         # Set up loss function
         if loss not in LOSS_FUNCTIONS:
             raise ValueError(f"Unknown loss function: {loss}")
-        self.loss_fn = LOSS_FUNCTIONS[loss]
+        self.loss_name = loss
+        self.loss_fn = LOSS_FUNCTIONS[loss][0]  # Get loss function
+        self.loss_derivative = LOSS_FUNCTIONS[loss][1]  # Get derivative
         
         # Set up optimizer
         if optimizer not in OPTIMIZERS:
@@ -135,11 +262,34 @@ class NeuralNetwork:
             current_output = layer.forward(current_output)
         return current_output
     
+    def backward(self, X: np.ndarray, y: np.ndarray, y_pred: np.ndarray) -> Dict[str, np.ndarray]:
+        """Compute gradients using backpropagation.
+        
+        Args:
+            X: Input data
+            y: True labels
+            y_pred: Model predictions
+            
+        Returns:
+            Dictionary of gradients for each parameter
+        """
+        batch_size = X.shape[0]
+        
+        # Initial gradient from loss function
+        grad = self.loss_derivative(y, y_pred)
+        
+        # Backpropagate through layers
+        for layer in reversed(self.layers):
+            grad = layer.backward(grad)
+            
+        return grad
+    
     def fit(self, X: np.ndarray, y: np.ndarray, epochs: int = 1000, 
             batch_size: Optional[int] = None, verbose: bool = True,
             validation_data: Optional[Tuple[np.ndarray, np.ndarray]] = None,
             early_stopping_patience: int = None,
-            early_stopping_min_delta: float = 1e-4):
+            early_stopping_min_delta: float = 1e-4,
+            num_verbose_prints: int = 10):
         """Train the network.
         
         Args:
@@ -151,6 +301,7 @@ class NeuralNetwork:
             validation_data: Optional tuple of (X_val, y_val) for validation
             early_stopping_patience: Number of epochs with no improvement after which training will be stopped
             early_stopping_min_delta: Minimum change in loss to qualify as an improvement
+            num_verbose_prints: Number of times to print progress during training
             
         Returns:
             Dictionary containing training history
@@ -193,6 +344,9 @@ class NeuralNetwork:
                 # Forward pass
                 predictions = self.forward(batch_X)
                 
+                # Backward pass
+                grad = self.backward(batch_X, batch_y, predictions)
+                
                 # Update weights
                 self.optimizer.step(self.layers, batch_X, batch_y, predictions)
                 
@@ -221,7 +375,9 @@ class NeuralNetwork:
                                 print(f"Early stopping triggered after {epoch + 1} epochs")
                             break
             
-            if verbose and (epoch + 1) % 100 == 0:
+            # Dynamic verbose printing
+            print_interval = max(1, epochs // num_verbose_prints)
+            if verbose and ((epoch + 1) % print_interval == 0 or epoch == 0 or epoch == epochs - 1):
                 log_msg = f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}"
                 if validation_data is not None:
                     log_msg += f", Val Loss: {val_loss:.4f}"
