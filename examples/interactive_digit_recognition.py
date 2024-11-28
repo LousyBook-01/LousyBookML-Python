@@ -230,9 +230,12 @@ def process_image():
 
 # Create the model with the same architecture as training
 model = NeuralNetwork([
-    {'units': 128, 'activation': 'relu'},    # Single hidden layer
-    {'units': 10, 'activation': 'linear'}    # Output layer
-], loss='mse', optimizer='adam')
+    {'units': 64, 'activation': 'relu', 'batch_norm': False}, 
+    {'units': 32, 'activation': 'relu', 'batch_norm': False},
+    {'units': 10, 'activation': 'softmax'}    
+], loss='categorical_crossentropy',  # Better for classification
+   optimizer='adam', 
+   learning_rate=0.001)  # Good learning rate with batch norm
 
 # Initialize the model
 model.initialize(784)  # 28x28 = 784 input features

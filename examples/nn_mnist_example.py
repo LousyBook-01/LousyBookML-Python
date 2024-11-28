@@ -71,36 +71,45 @@ y_test_onehot = np.zeros((y_test.size, 10))
 y_test_onehot[np.arange(y_test.size), y_test] = 1
 
 # Create data augmentation function
-def augment_with_straight_digits(X, y, y_onehot, num_variations=2):
-    """Augment dataset with straight-line variations."""
-    print("Augmenting dataset with straight-line variations...")
+def augment_with_straight_digits(X, y, y_onehot, num_variations=2, chunk_size=1000):
+    """Augment dataset with straight-line variations using chunked processing."""
+    print("Augmenting dataset with straight-line variations in chunks...")
     n_samples = X.shape[0]
-    
-    # Initialize arrays with original data
     total_samples = n_samples * (num_variations + 1)
-    augmented_X = np.zeros((total_samples, 784), dtype=X.dtype)  # Flatten to 784
+    
+    # Initialize arrays for final results
+    augmented_X = np.zeros((total_samples, 784), dtype=X.dtype)
     augmented_y = np.zeros(total_samples, dtype=y.dtype)
     augmented_y_onehot = np.zeros((total_samples, y_onehot.shape[1]), dtype=y_onehot.dtype)
     
-    # Copy original data (flatten X first)
-    augmented_X[:n_samples] = X.reshape(n_samples, -1)
-    augmented_y[:n_samples] = y
-    augmented_y_onehot[:n_samples] = y_onehot
-    
-    # Create variations with straighter lines
-    for v in range(num_variations):
-        start_idx = (v + 1) * n_samples
-        end_idx = (v + 2) * n_samples
+    # Process original data in chunks
+    for i in range(0, n_samples, chunk_size):
+        end_idx = min(i + chunk_size, n_samples)
+        chunk_size_actual = end_idx - i
         
-        # Create thresholded version (vectorized)
-        imgs = X.copy()
-        imgs = np.where(imgs > 127, 255, 0)
+        # Copy original chunk data
+        augmented_X[i:end_idx] = X[i:end_idx].reshape(chunk_size_actual, -1)
+        augmented_y[i:end_idx] = y[i:end_idx]
+        augmented_y_onehot[i:end_idx] = y_onehot[i:end_idx]
         
-        # Store augmented data (flatten before storing)
-        augmented_X[start_idx:end_idx] = imgs.reshape(n_samples, -1)
-        augmented_y[start_idx:end_idx] = y
-        augmented_y_onehot[start_idx:end_idx] = y_onehot
+        # Create variations for this chunk
+        for v in range(num_variations):
+            start_aug_idx = n_samples * (v + 1) + i
+            end_aug_idx = n_samples * (v + 1) + end_idx
+            
+            # Create thresholded version for this chunk
+            chunk_imgs = X[i:end_idx].copy()
+            chunk_imgs = np.where(chunk_imgs > 127, 255, 0)
+            
+            # Store augmented chunk
+            augmented_X[start_aug_idx:end_aug_idx] = chunk_imgs.reshape(chunk_size_actual, -1)
+            augmented_y[start_aug_idx:end_aug_idx] = y[i:end_idx]
+            augmented_y_onehot[start_aug_idx:end_aug_idx] = y_onehot[i:end_idx]
+        
+        if (i + chunk_size) % 5000 == 0:
+            print(f"Processed {i + chunk_size}/{n_samples} samples...")
     
+    print("Augmentation complete!")
     return augmented_X, augmented_y, augmented_y_onehot
 
 # Prepare and scale the data
@@ -119,10 +128,10 @@ X_test_norm = scaler.transform(X_test_reshaped)
 # X_train_aug_norm = scaler.transform(X_train_aug.astype('float32') / 255.0)
 
 # Use augmented or original data
-use_augmentation = True  # Enable augmentation
+use_augmentation = False  # Enable augmentation
 if use_augmentation:
     X_train_aug, y_train_aug, y_train_onehot_aug = augment_with_straight_digits(
-        X_train, y_train, y_train_onehot, num_variations=2)  # Increased variations
+        X_train, y_train, y_train_onehot, num_variations=5, chunk_size=1000)  # Process in chunks of 1000
     X_train_aug_norm = scaler.transform(X_train_aug.astype('float32') / 255.0)
     train_X = X_train_aug_norm
     train_y = y_train_onehot_aug
@@ -132,26 +141,51 @@ else:
 
 # Create and train the model with optimized architecture
 model = NeuralNetwork([
-    {'units': 512, 'activation': 'relu', 'batch_norm': True},    # Larger first layer with batch norm
-    {'units': 256, 'activation': 'relu', 'batch_norm': True},    # Second hidden layer
-    {'units': 128, 'activation': 'relu', 'batch_norm': True},    # Third hidden layer
+    {'units': 64, 'activation': 'relu', 'batch_norm': False},    # Larger first layer with batch norm
+    {'units': 32, 'activation': 'relu', 'batch_norm': False},    # Second hidden layer
     {'units': 10, 'activation': 'softmax'}                       # Output layer with softmax
-], loss='categorical_crossentropy',  # Better for classification
+], loss='mse',  # Better for classification
    optimizer='adam', 
    learning_rate=0.001)  # Good learning rate with batch norm
 
 # Initialize the model with the correct input size (28x28 = 784)
 model.initialize(784)
 
-# Train the model with early stopping
+def calculate_accuracy(model, X, y_true):
+    """Calculate accuracy for the given data."""
+    predictions = model.predict(X)
+    if len(y_true.shape) > 1:  # If one-hot encoded
+        y_true = np.argmax(y_true, axis=1)
+    predicted_classes = np.argmax(predictions, axis=1)
+    return np.mean(predicted_classes == y_true)
+
+# Train the model with early stopping and print accuracy
 print("Training model...")
-history = model.fit(train_X, train_y, 
-                   epochs=50,                # More epochs since we have GPU
-                   batch_size=128,           # Good batch size for efficiency
-                   validation_data=(X_test_norm, y_test_onehot),
-                   early_stopping_patience=5, # Stop if no improvement for 5 epochs
-                   early_stopping_min_delta=1e-4,
-                   num_verbose_prints=20)    # Progress updates
+for epoch in range(20):
+    # Train for one epoch
+    history = model.fit(train_X, train_y, 
+                       epochs=1,
+                       batch_size=128,           
+                       validation_data=(X_test_norm, y_test_onehot),
+                       early_stopping_patience=5,
+                       early_stopping_min_delta=1e-4,
+                       num_verbose_prints=1)
+    
+    # Calculate and print accuracies
+    train_acc = calculate_accuracy(model, train_X, train_y)
+    val_acc = calculate_accuracy(model, X_test_norm, y_test)
+    print(f"Epoch {epoch+1}/20:")
+    print(f"  Training Loss: {history['loss'][-1]:.4f}")
+    print(f"  Training Accuracy: {train_acc:.4f}")
+    print(f"  Validation Loss: {history['val_loss'][-1]:.4f}")
+    print(f"  Validation Accuracy: {val_acc:.4f}")
+
+# Print final metrics
+final_train_acc = calculate_accuracy(model, train_X, train_y)
+final_val_acc = calculate_accuracy(model, X_test_norm, y_test)
+print("\nFinal Results:")
+print(f"Final Training Accuracy: {final_train_acc:.4f}")
+print(f"Final Validation Accuracy: {final_val_acc:.4f}")
 
 # Save the trained weights
 print("Saving model weights and scaler...")
